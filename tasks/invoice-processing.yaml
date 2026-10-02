@@ -1,0 +1,69 @@
+id: invoice-processing
+title: Invoice processing
+goal_template: >-
+  Turn supplier invoice requests from the AP mailbox into validated invoices
+  filed in LedgerLite, with payments prepared and any required human approval
+  obtained. Request: {request}
+sop: invoice-processing
+policies:
+  - spend-limits
+  - action-rules
+tools:
+  - mail.list
+  - mail.read
+  - mail.mark_read
+  - files.list
+  - files.read
+  - files.write
+  - files.move
+  - files.archive
+  - browser.navigate
+  - browser.snapshot
+  - browser.click
+  - browser.type
+  - browser.select
+  - browser.extract
+  - browser.screenshot
+  - erp.list_vendors
+  - erp.get_vendor
+  - erp.list_purchase_orders
+  - erp.get_purchase_order
+  - erp.get_goods_receipt
+  - erp.list_invoices
+  - erp.get_invoice
+  - erp.file_invoice
+  - erp.schedule_payment
+approval_rules:
+  - id: over-spend-limit
+    description: >-
+      Prepare any payment above the approval threshold, but wait for a human
+      decision before submitting it.
+    policy: spend-limits
+    actions:
+      - payment.schedule
+  - id: blocked-vendor
+    description: >-
+      Never pay a blocked vendor. This is a policy denial, not an approval
+      gate.
+    policy: action-rules
+    actions:
+      - payment.schedule
+verification:
+  - id: invoice-filed
+    description: The invoice exists in LedgerLite against the right vendor and amount.
+    check: erp_invoice_matches
+    params:
+      match:
+        - vendor_id
+        - invoice_number
+        - amount_cents
+  - id: payment-scheduled
+    description: A payment is scheduled for the invoice, or an approval is pending above the limit.
+    check: erp_payment_state
+    params:
+      allow_pending_approval: true
+  - id: source-archived
+    description: The source invoice document is in the processed archive.
+    check: file_archived
+    params:
+      directory: processed

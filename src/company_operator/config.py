@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     model_vision: str = "deepseek-v4-flash-vision-exp"
     llm_mode: Literal["live", "record", "replay"] = "live"
     fixture_dir: Path = Path("tests/fixtures/llm")
+    company_dir: Path = Path("company")
+    tasks_dir: Path = Path("tasks")
+    run_db: Path = Path("runs/operator.db")
     max_steps: int = 60
     max_cost_usd: float = 5.0
     request_timeout_s: float = 120.0

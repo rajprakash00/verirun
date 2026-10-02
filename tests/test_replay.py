@@ -63,3 +63,22 @@ def test_record_mode_writes_a_fixture_file(tmp_path) -> None:
     assert len(fixtures) == 1
     payload = json.loads(fixtures[0].read_text())
     assert payload["response"]["text"] == "recorded answer"
+
+
+def test_response_format_is_part_of_the_replay_key(tmp_path) -> None:
+    settings = _settings(tmp_path)
+    live = LiveClient(settings, transport=httpx.MockTransport(_handler))
+    recorder = ReplayClient(settings, mode="record", inner=live)
+    messages = [{"role": "user", "content": "hello"}]
+
+    recorder.complete(messages)
+    recorder.complete(messages, response_format={"type": "json_object"})
+
+    assert len(list(tmp_path.glob("*.json"))) == 2
+    assert ReplayClient(settings, mode="replay").complete(messages).text == "recorded answer"
+    assert (
+        ReplayClient(settings, mode="replay")
+        .complete(messages, response_format={"type": "json_object"})
+        .text
+        == "recorded answer"
+    )

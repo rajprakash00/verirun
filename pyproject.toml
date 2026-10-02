@@ -14,6 +14,7 @@ dependencies = [
     "pypdf>=6.19.0",
     "fpdf2>=2.8.9",
     "pillow>=12.3.0",
+    "pyyaml>=6.0.2",
 ]
 
 [dependency-groups]
