@@ -3,11 +3,52 @@
 from __future__ import annotations
 
 import json
+import socket
+import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
+
+import httpx
+import uvicorn
 
 from company_operator.llm.client import AssistantTurn, Usage
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@contextmanager
+def serve(app: Any) -> Iterator[str]:
+    """Serve an ASGI app on a free port for real browser tests."""
+    port = free_port()
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    base_url = f"http://127.0.0.1:{port}"
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            if httpx.get(f"{base_url}/api/health", timeout=0.5).status_code == 200:
+                break
+        except httpx.HTTPError:
+            time.sleep(0.05)
+    else:
+        raise RuntimeError(f"server did not start on {base_url}")
+    try:
+        yield base_url
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
 
 WORK_ORDER = {
     "sop": "invoice-processing",

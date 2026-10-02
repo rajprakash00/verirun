@@ -9,6 +9,7 @@ from mocks.ledgerlite.app import create_app
 from mocks.maildesk.app import create_app as create_maildesk_app
 from mocks.seed.ledgerlite import reset_and_seed
 from mocks.seed.maildesk import reset_and_seed as reset_and_seed_maildesk
+from tests.support import serve
 
 
 class MaildeskState(NamedTuple):
@@ -42,3 +43,9 @@ def maildesk_client(maildesk_state: MaildeskState) -> Iterator[TestClient]:
         create_maildesk_app(maildesk_state.db_path, maildesk_state.shared_root)
     ) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def ledgerlite_server(ledgerlite_db: Path) -> Iterator[str]:
+    with serve(create_app(ledgerlite_db)) as base_url:
+        yield base_url
