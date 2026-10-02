@@ -131,6 +131,7 @@ class ReadFileTool(FileTool):
 class WriteFileTool(FileTool):
     name = "files.write"
     description = "Write a text document into the shared file tree, creating directories as needed."
+    side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -168,6 +169,7 @@ class WriteFileTool(FileTool):
 class MoveFileTool(FileTool):
     name = "files.move"
     description = "Move or rename a file or directory inside the shared file tree."
+    side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -213,6 +215,7 @@ class ArchiveFileTool(FileTool):
         "Archive a processed document by moving it into an archive folder, "
         "for example 'processed'."
     )
+    side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {

@@ -19,6 +19,9 @@ DEFAULT_PRICES: dict[str, ModelPrice] = {
 
 ModelRole = Literal["loop", "reason", "vision"]
 
+DEFAULT_MAX_STEPS = 60
+DEFAULT_MAX_COST_USD = 5.0
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -38,8 +41,8 @@ class Settings(BaseSettings):
     company_dir: Path = Path("company")
     tasks_dir: Path = Path("tasks")
     run_db: Path = Path("runs/operator.db")
-    max_steps: int = 60
-    max_cost_usd: float = 5.0
+    max_steps: int = DEFAULT_MAX_STEPS
+    max_cost_usd: float = DEFAULT_MAX_COST_USD
     request_timeout_s: float = 120.0
     prices: dict[str, ModelPrice] = Field(default_factory=lambda: dict(DEFAULT_PRICES))
 

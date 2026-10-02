@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -5,7 +6,7 @@ import pytest
 
 from company_operator.context.models import ApprovalGate, WorkOrder
 from company_operator.engine.models import Observation, Plan, Step
-from company_operator.engine.states import RunState
+from company_operator.engine.states import RunState, StepState
 from company_operator.runs.store import RunNotFoundError, RunStore
 
 
@@ -150,6 +151,100 @@ def test_journal_is_idempotent_by_key(store: RunStore) -> None:
     entries = store.list_journal("RUN-0001")
     assert entries[-1].status == "done"
     assert entries[-1].result == {"invoice_id": "INV-3001"}
+
+
+def test_step_states_round_trip_in_position_order(store: RunStore) -> None:
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+    store.save_plan("RUN-0001", plan())
+
+    assert store.get_step_states("RUN-0001") == ["pending", "pending"]
+
+    store.set_step_state("RUN-0001", 0, StepState.RUNNING)
+    store.set_step_state("RUN-0001", 0, StepState.DONE)
+
+    assert store.get_step_states("RUN-0001") == [StepState.DONE, StepState.PENDING]
+    with pytest.raises(KeyError):
+        store.set_step_state("RUN-0001", 5, StepState.DONE)
+
+
+def test_usage_counters_accumulate(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+
+    store.increment_usage("RUN-0001", steps=2, cost_usd=0.25)
+    store.increment_usage("RUN-0001", steps=1, cost_usd=0.5)
+
+    reopened = RunStore(tmp_path / "runs.db")
+    run = reopened.get_run("RUN-0001")
+    assert run.steps_used == 3
+    assert run.cost_usd == pytest.approx(0.75)
+
+
+def test_journal_entry_can_be_fetched_by_key(store: RunStore) -> None:
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+    store.record_action("RUN-0001", "key", "erp.file_invoice", {"id": "x"})
+    store.complete_action("RUN-0001", "key", {"ok": True})
+
+    entry = store.get_journal_entry("RUN-0001", "key")
+
+    assert entry is not None
+    assert entry.action == "erp.file_invoice"
+    assert entry.status == "done"
+    assert entry.result == {"ok": True}
+    assert store.get_journal_entry("RUN-0001", "missing") is None
+
+
+OLD_SCHEMA = """
+CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    request TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    work_order_json TEXT,
+    plan_json TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    step_position INTEGER,
+    ok INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    data_json TEXT NOT NULL DEFAULT '{}',
+    error_kind TEXT,
+    artifacts_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+"""
+
+
+def test_store_migrates_a_database_from_the_previous_schema(tmp_path: Path) -> None:
+    db_path = tmp_path / "old.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(OLD_SCHEMA)
+        conn.execute(
+            """
+            INSERT INTO runs (id, request, task_id, state, created_at, updated_at)
+            VALUES ('RUN-0001', 'request', 'invoice-processing', 'planned', ?, ?)
+            """,
+            ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+        )
+
+    store = RunStore(db_path)
+    run = store.get_run("RUN-0001")
+
+    assert run.steps_used == 0
+    assert run.cost_usd == 0.0
+    store.increment_usage("RUN-0001", steps=1, cost_usd=0.5)
+    store.add_observation(
+        "RUN-0001",
+        Observation(ok=True, summary="listed"),
+        tool="files.list",
+    )
+    assert store.get_run("RUN-0001").steps_used == 1
+    assert store.list_observations("RUN-0001")[0].tool == "files.list"
 
 
 def test_failed_action_can_be_retried(store: RunStore) -> None:

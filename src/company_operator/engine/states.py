@@ -3,6 +3,12 @@ from __future__ import annotations
 from enum import StrEnum
 
 
+class StepState(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+
+
 class RunState(StrEnum):
     CREATED = "created"
     RESOLVING = "resolving"
@@ -13,6 +19,7 @@ class RunState(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     NEEDS_HUMAN = "needs_human"
+    LIMIT_REACHED = "limit_reached"
 
 
 TRANSITIONS: dict[RunState, frozenset[RunState]] = {
@@ -29,9 +36,17 @@ TRANSITIONS: dict[RunState, frozenset[RunState]] = {
     RunState.AWAITING_APPROVAL: frozenset(
         {RunState.EXECUTING, RunState.NEEDS_HUMAN, RunState.FAILED}
     ),
-    RunState.EXECUTING: frozenset({RunState.VERIFYING, RunState.NEEDS_HUMAN, RunState.FAILED}),
+    RunState.EXECUTING: frozenset(
+        {
+            RunState.VERIFYING,
+            RunState.NEEDS_HUMAN,
+            RunState.FAILED,
+            RunState.LIMIT_REACHED,
+        }
+    ),
     RunState.VERIFYING: frozenset({RunState.COMPLETED, RunState.NEEDS_HUMAN, RunState.FAILED}),
     RunState.COMPLETED: frozenset(),
+    RunState.LIMIT_REACHED: frozenset(),
     RunState.FAILED: frozenset({RunState.RESOLVING, RunState.EXECUTING}),
     RunState.NEEDS_HUMAN: frozenset({RunState.PLANNED, RunState.EXECUTING}),
 }

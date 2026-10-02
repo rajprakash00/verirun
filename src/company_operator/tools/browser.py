@@ -310,6 +310,7 @@ class SnapshotTool(BrowserTool):
 class ClickTool(BrowserTool):
     name = "browser.click"
     description = "Click the element with the given ref from the latest snapshot."
+    side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -337,6 +338,7 @@ class ClickTool(BrowserTool):
 class TypeTool(BrowserTool):
     name = "browser.type"
     description = "Fill a text field with the given ref. Optionally press Enter to submit."
+    side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -375,6 +377,7 @@ class TypeTool(BrowserTool):
 class SelectTool(BrowserTool):
     name = "browser.select"
     description = "Choose an option in a select field by its value, then by its label."
+    side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {

@@ -10,7 +10,7 @@ from typing import Any
 
 from company_operator.context.models import WorkOrder
 from company_operator.engine.models import Observation, Plan, Step
-from company_operator.engine.states import RunState, transition
+from company_operator.engine.states import RunState, StepState, transition
 from company_operator.runs.models import (
     Checkpoint,
     JournalEntry,
@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS runs (
     work_order_json TEXT,
     plan_json TEXT,
     error TEXT,
+    steps_used INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL NOT NULL DEFAULT 0.0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -47,6 +49,7 @@ CREATE TABLE IF NOT EXISTS observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
     step_position INTEGER,
+    tool TEXT,
     ok INTEGER NOT NULL,
     summary TEXT NOT NULL,
     data_json TEXT NOT NULL DEFAULT '{}',
@@ -104,11 +107,26 @@ class RunStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as conn, conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         return conn
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add columns introduced after the first schema to existing databases."""
+        run_columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)")}
+        if "steps_used" not in run_columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN steps_used INTEGER NOT NULL DEFAULT 0")
+        if "cost_usd" not in run_columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0.0")
+        observation_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(observations)")
+        }
+        if "tool" not in observation_columns:
+            conn.execute("ALTER TABLE observations ADD COLUMN tool TEXT")
 
     def create_run(self, request: str, task_id: str, run_id: str | None = None) -> Run:
         run_id = run_id or generate_run_id()
@@ -170,7 +188,7 @@ class RunStore:
                     """
                     INSERT INTO steps (run_id, position, id, goal, allowed_tools_json,
                                        done_criterion, state)
-                    VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -179,6 +197,7 @@ class RunStore:
                         step.goal,
                         json.dumps(step.allowed_tools),
                         step.done_criterion,
+                        StepState.PENDING.value,
                     ),
                 )
         self._require(run_id)
@@ -198,22 +217,57 @@ class RunStore:
             for row in rows
         ]
 
+    def set_step_state(self, run_id: str, position: int, state: StepState) -> None:
+        with closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                "UPDATE steps SET state = ? WHERE run_id = ? AND position = ?",
+                (state.value, run_id, position),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"no Step at position {position} for Run {run_id}")
+
+    def get_step_states(self, run_id: str) -> list[StepState]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT state FROM steps WHERE run_id = ? ORDER BY position", (run_id,)
+            ).fetchall()
+        return [StepState(row["state"]) for row in rows]
+
     def set_error(self, run_id: str, message: str) -> None:
         self._update_run(run_id, "error = ?", (message,))
 
+    def increment_usage(
+        self, run_id: str, *, steps: int = 0, cost_usd: float = 0.0
+    ) -> None:
+        self._require(run_id)
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET steps_used = steps_used + ?, cost_usd = cost_usd + ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (steps, cost_usd, _iso(_now()), run_id),
+            )
+
     def add_observation(
-        self, run_id: str, observation: Observation, step_position: int | None = None
+        self,
+        run_id: str,
+        observation: Observation,
+        step_position: int | None = None,
+        tool: str | None = None,
     ) -> int:
         with closing(self._connect()) as conn, conn:
             cursor = conn.execute(
                 """
-                INSERT INTO observations (run_id, step_position, ok, summary, data_json,
+                INSERT INTO observations (run_id, step_position, tool, ok, summary, data_json,
                                           error_kind, artifacts_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
                     step_position,
+                    tool,
                     int(observation.ok),
                     observation.summary,
                     json.dumps(observation.data),
@@ -234,6 +288,7 @@ class RunStore:
                 id=row["id"],
                 run_id=row["run_id"],
                 step_position=row["step_position"],
+                tool=row["tool"],
                 ok=bool(row["ok"]),
                 summary=row["summary"],
                 data=json.loads(row["data_json"]),
@@ -287,32 +342,22 @@ class RunStore:
         self._update_journal(run_id, key, "status = 'failed', error = ?", error)
 
     def completed_action(self, run_id: str, key: str) -> bool:
+        entry = self.get_journal_entry(run_id, key)
+        return entry is not None and entry.status == "done"
+
+    def get_journal_entry(self, run_id: str, key: str) -> JournalEntry | None:
         with closing(self._connect()) as conn:
             row = conn.execute(
-                "SELECT status FROM journal WHERE run_id = ? AND key = ?", (run_id, key)
+                "SELECT * FROM journal WHERE run_id = ? AND key = ?", (run_id, key)
             ).fetchone()
-        return row is not None and row["status"] == "done"
+        return _row_to_journal(row) if row is not None else None
 
     def list_journal(self, run_id: str) -> list[JournalEntry]:
         with closing(self._connect()) as conn:
             rows = conn.execute(
                 "SELECT * FROM journal WHERE run_id = ? ORDER BY id", (run_id,)
             ).fetchall()
-        return [
-            JournalEntry(
-                id=row["id"],
-                run_id=row["run_id"],
-                key=row["key"],
-                action=row["action"],
-                payload=json.loads(row["payload_json"]),
-                status=row["status"],
-                result=json.loads(row["result_json"]) if row["result_json"] else None,
-                error=row["error"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-                updated_at=datetime.fromisoformat(row["updated_at"]),
-            )
-            for row in rows
-        ]
+        return [_row_to_journal(row) for row in rows]
 
     def save_checkpoint(self, run_id: str, label: str, state: dict[str, Any]) -> None:
         with closing(self._connect()) as conn, conn:
@@ -387,6 +432,23 @@ def _row_to_run(row: sqlite3.Row) -> Run:
         if row["work_order_json"]
         else None,
         plan=Plan.model_validate_json(row["plan_json"]) if row["plan_json"] else None,
+        error=row["error"],
+        steps_used=row["steps_used"],
+        cost_usd=row["cost_usd"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
+
+
+def _row_to_journal(row: sqlite3.Row) -> JournalEntry:
+    return JournalEntry(
+        id=row["id"],
+        run_id=row["run_id"],
+        key=row["key"],
+        action=row["action"],
+        payload=json.loads(row["payload_json"]),
+        status=row["status"],
+        result=json.loads(row["result_json"]) if row["result_json"] else None,
         error=row["error"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
