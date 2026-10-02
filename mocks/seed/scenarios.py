@@ -163,4 +163,26 @@ SCENARIOS: tuple[InvoiceScenario, ...] = (
     SCANNED,
 )
 
+
+@dataclass(frozen=True)
+class VendorOnboardingScenario:
+    key: str
+    company_name: str
+    contact_name: str
+    contact_email: str
+    tax_id: str
+    address: str
+    tax_form_filename: str
+
+
+VENDOR_ONBOARDING = VendorOnboardingScenario(
+    key="vendor_onboarding",
+    company_name="Cascade Fabrication LLC",
+    contact_name="Maya Alvarez",
+    contact_email="accounts@cascade-fabrication.example",
+    tax_id="TAX-2001",
+    address="4820 Foundry Way, Portland, OR 97210",
+    tax_form_filename="cascade-fabrication-w9.pdf",
+)
+
 SCENARIOS_BY_KEY: dict[str, InvoiceScenario] = {scenario.key: scenario for scenario in SCENARIOS}

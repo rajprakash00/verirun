@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}MailDesk — {{ message.subject }}{% endblock %}
+{% block content %}
+<h1>{{ message.subject }}</h1>
+<dl class="detail">
+  <dt>From</dt><dd>{{ message.sender_name }} &lt;{{ message.sender_email }}&gt;</dd>
+  <dt>To</dt><dd>{{ message.recipients }}</dd>
+  <dt>Received</dt><dd>{{ message.received_at }}</dd>
+</dl>
+<div class="body">{{ message.body }}</div>
+<h2>Attachments</h2>
+{% if attachments %}
+<ul class="attachments">
+  {% for attachment in attachments %}
+  <li>
+    <a href="/attachments/{{ attachment.id }}/download">{{ attachment.filename }}</a>
+    ({{ attachment.content_type }}, {{ attachment.size_bytes }} bytes)
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>No attachments.</p>
+{% endif %}
+{% endblock %}
