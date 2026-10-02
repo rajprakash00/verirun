@@ -46,12 +46,23 @@ class LLMClient(Protocol):
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         model_role: ModelRole = "loop",
+        response_format: dict[str, Any] | None = None,
     ) -> AssistantTurn: ...
 
 
-def _request_key(model: str, messages: list[Message], tools: list[ToolSpec] | None) -> str:
+def _request_key(
+    model: str,
+    messages: list[Message],
+    tools: list[ToolSpec] | None,
+    response_format: dict[str, Any] | None = None,
+) -> str:
     payload = json.dumps(
-        {"model": model, "messages": messages, "tools": tools or []},
+        {
+            "model": model,
+            "messages": messages,
+            "tools": tools or [],
+            "response_format": response_format,
+        },
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -114,12 +125,15 @@ class LiveClient:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         model_role: ModelRole = "loop",
+        response_format: dict[str, Any] | None = None,
     ) -> AssistantTurn:
         model = self._settings.model_for(model_role)
         payload: dict[str, Any] = {"model": model, "messages": messages}
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if response_format:
+            payload["response_format"] = response_format
         response = self._client.post("/chat/completions", json=payload)
         response.raise_for_status()
         return _parse_turn(model, response.json())
@@ -147,9 +161,10 @@ class ReplayClient:
         messages: list[Message],
         tools: list[ToolSpec] | None = None,
         model_role: ModelRole = "loop",
+        response_format: dict[str, Any] | None = None,
     ) -> AssistantTurn:
         model = self._settings.model_for(model_role)
-        key = _request_key(model, messages, tools)
+        key = _request_key(model, messages, tools, response_format)
         path = self._dir / f"{key}.json"
         if self._mode == "replay":
             if not path.exists():
@@ -157,11 +172,16 @@ class ReplayClient:
             data = json.loads(path.read_text(encoding="utf-8"))
             return AssistantTurn.model_validate(data["response"])
         assert self._inner is not None
-        turn = self._inner.complete(messages, tools, model_role)
+        turn = self._inner.complete(messages, tools, model_role, response_format)
         path.write_text(
             json.dumps(
                 {
-                    "request": {"model": model, "messages": messages, "tools": tools or []},
+                    "request": {
+                        "model": model,
+                        "messages": messages,
+                        "tools": tools or [],
+                        "response_format": response_format,
+                    },
                     "response": turn.model_dump(),
                 },
                 indent=2,

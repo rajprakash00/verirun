@@ -1,0 +1,33 @@
+id: spend-limits
+title: Spend limits
+description: >-
+  Limits how much money the Operator may commit without a human decision.
+  Amounts are in US dollars unless a rule says otherwise.
+rules:
+  - id: approval-threshold
+    description: >-
+      Any payment above 10,000.00 USD must be prepared, then held at an
+      approval gate until a human approves it. Timeouts never auto-approve.
+    effect: require_approval
+    actions:
+      - payment.schedule
+    when:
+      - field: amount_usd
+        op: gt
+        value: 10000
+  - id: no-split-payments
+    description: >-
+      Splitting one invoice into several payments to stay under the approval
+      threshold is forbidden.
+    effect: forbid
+    actions:
+      - payment.split
+  - id: allowed-currency
+    description: Payments may only be scheduled in USD.
+    effect: forbid
+    actions:
+      - payment.schedule
+    when:
+      - field: currency
+        op: ne
+        value: USD

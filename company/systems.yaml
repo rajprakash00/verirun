@@ -1,0 +1,34 @@
+# Systems the Operator may use in this sandbox.
+#
+# Credentials are sandbox-only. The base URLs match the Mock Suite defaults in
+# scripts/serve_maildesk.py and scripts/serve_ledgerlite.py.
+systems:
+  - id: maildesk
+    title: MailDesk webmail
+    kind: web
+    base_url: http://127.0.0.1:8001
+    description: >-
+      The company mailbox. Invoice and vendor requests arrive here with their
+      attachments.
+    credentials:
+      username: ap@company.example
+      password: maildesk
+
+  - id: ledgerlite
+    title: LedgerLite ERP
+    kind: web
+    base_url: http://127.0.0.1:8002
+    description: >-
+      The company ERP. Holds vendors, purchase orders, goods receipts,
+      invoices, payments, and approvals. Ground truth for verification.
+    credentials:
+      username: ap@company.example
+      password: ledgerlite
+
+  - id: files
+    title: Shared file tree
+    kind: filesystem
+    root: shared
+    description: >-
+      Shared documents and archive folders: documents/, archive/, and
+      processed/.

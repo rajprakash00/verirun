@@ -63,3 +63,29 @@ def test_live_client_returns_tool_call() -> None:
     assert turn.tool_calls[0].arguments == {"path": "/tmp"}
     assert turn.usage.prompt_tokens == 100
     assert turn.usage.cached_tokens == 60
+
+
+def test_live_client_sends_response_format() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "{}"}}]},
+        )
+
+    settings = Settings(
+        _env_file=None,
+        api_key="test-key",
+        base_url="https://example.test/v1",
+        model_loop="loop-model",
+    )
+    client = LiveClient(settings, transport=httpx.MockTransport(handler))
+
+    client.complete(
+        [{"role": "user", "content": "reply in json"}],
+        response_format={"type": "json_object"},
+    )
+
+    assert captured["response_format"] == {"type": "json_object"}

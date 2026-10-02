@@ -1,0 +1,38 @@
+id: action-rules
+title: Permitted and forbidden actions
+description: >-
+  What the Operator may do, what it must never do, and what always needs a
+  human yes.
+rules:
+  - id: no-payment-to-blocked-vendor
+    description: Payments to a vendor marked blocked in LedgerLite are forbidden.
+    effect: forbid
+    actions:
+      - payment.schedule
+    when:
+      - field: vendor_status
+        op: eq
+        value: blocked
+  - id: no-external-email
+    description: Sending email to an address outside the company requires human approval.
+    effect: require_approval
+    actions:
+      - mail.send
+    when:
+      - field: recipient_domain
+        op: ne
+        value: company.example
+  - id: no-delete-documents
+    description: Source documents and evidence may never be deleted.
+    effect: forbid
+    actions:
+      - files.delete
+  - id: no-payment-writes-outside-ledgerlite
+    description: Payments may only be scheduled through LedgerLite.
+    effect: forbid
+    actions:
+      - payment.schedule
+    when:
+      - field: system
+        op: ne
+        value: ledgerlite
