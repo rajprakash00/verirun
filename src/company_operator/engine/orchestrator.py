@@ -1,15 +1,26 @@
-"""Start a Run: Resolve, then Plan, with every outcome persisted."""
+"""Run the engine: Resolve, Plan, Execute, Verify, and Report.
+
+``start_run`` covers the first two phases. ``run_task`` drives a whole Run to
+its verified outcome and always leaves an Evidence Pack behind.
+"""
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from company_operator.config import DEFAULT_MAX_COST_USD, DEFAULT_MAX_STEPS, ModelPrice
 from company_operator.context.company import CompanyContext
 from company_operator.context.task_pack import TaskPack, TaskPackError
+from company_operator.engine.execute import execute_run
 from company_operator.engine.plan import plan_run
 from company_operator.engine.resolve import resolve
 from company_operator.engine.states import RunState
+from company_operator.engine.verify import CHECKS, verify_run
 from company_operator.llm.client import LLMClient
+from company_operator.runs.evidence import write_evidence
 from company_operator.runs.models import Run
-from company_operator.runs.store import RunStore
+from company_operator.runs.store import RunNotFoundError, RunStore, generate_run_id
+from company_operator.tools.registry import ToolRegistry
 
 
 def validate_task_pack(task_pack: TaskPack, context: CompanyContext) -> None:
@@ -21,6 +32,12 @@ def validate_task_pack(task_pack: TaskPack, context: CompanyContext) -> None:
     if missing:
         raise TaskPackError(
             f"Task Pack '{task_pack.id}' references missing policies: {missing}"
+        )
+    unknown_checks = [check.check for check in task_pack.verification if check.check not in CHECKS]
+    if unknown_checks:
+        raise TaskPackError(
+            f"Task Pack '{task_pack.id}' references unknown verification checks: "
+            f"{unknown_checks}; registered: {sorted(CHECKS)}"
         )
 
 
@@ -48,3 +65,55 @@ def start_run(
         store.set_error(run.id, str(exc))
         store.transition(run.id, RunState.FAILED)
         raise
+
+
+def run_task(
+    request: str,
+    task_pack: TaskPack,
+    context: CompanyContext,
+    client: LLMClient,
+    store: RunStore,
+    registry: ToolRegistry,
+    *,
+    erp_db_path: str | Path,
+    shared_root: str | Path,
+    evidence_root: str | Path,
+    max_steps: int = DEFAULT_MAX_STEPS,
+    max_cost_usd: float = DEFAULT_MAX_COST_USD,
+    prices: dict[str, ModelPrice] | None = None,
+    run_id: str | None = None,
+) -> Run:
+    """Drive one Request from Resolve to Report, always writing an Evidence Pack."""
+    run_id = run_id or generate_run_id()
+    try:
+        run = start_run(request, task_pack, context, client, store, run_id=run_id)
+        if run.state is RunState.PLANNED:
+            run = execute_run(
+                run.id,
+                client,
+                store,
+                registry,
+                max_steps=max_steps,
+                max_cost_usd=max_cost_usd,
+                prices=prices,
+            )
+        if run.state is RunState.VERIFYING:
+            run = verify_run(
+                run.id,
+                task_pack,
+                store,
+                erp_db_path=erp_db_path,
+                shared_root=shared_root,
+            )
+    finally:
+        try:
+            report_run(run_id, store, evidence_root)
+        except RunNotFoundError:
+            pass
+    return store.get_run(run_id)
+
+
+def report_run(run_id: str, store: RunStore, evidence_root: str | Path) -> Path:
+    """Write the Evidence Pack for a Run under its own directory."""
+    run = store.get_run(run_id)
+    return write_evidence(run, store, Path(evidence_root) / run.id)

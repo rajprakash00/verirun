@@ -15,7 +15,8 @@ CREATE TABLE messages (
     subject TEXT NOT NULL,
     body TEXT NOT NULL,
     received_at TEXT NOT NULL,
-    scenario TEXT NOT NULL
+    scenario TEXT NOT NULL,
+    read_at TEXT
 );
 
 CREATE TABLE attachments (
@@ -41,3 +42,6 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+    if "read_at" not in columns:
+        conn.execute("ALTER TABLE messages ADD COLUMN read_at TEXT")

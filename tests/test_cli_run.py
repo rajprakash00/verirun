@@ -6,6 +6,9 @@ import pytest
 
 from company_operator.cli import main
 from company_operator.config import Settings
+from company_operator.context.company import load_company_context
+from company_operator.context.task_pack import load_task_pack
+from company_operator.engine.orchestrator import start_run
 from company_operator.engine.states import RunState
 from company_operator.runs.store import RunStore
 from tests.support import PLAN, ROOT, WORK_ORDER, ScriptedClient
@@ -23,44 +26,42 @@ def make_settings(tmp_path: Path) -> Settings:
     )
 
 
-def test_run_resolves_plans_and_persists(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_run_resolves_plans_and_persists(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
-    client = ScriptedClient([json.dumps(WORK_ORDER), json.dumps(PLAN)])
+    context = load_company_context(settings.company_dir)
+    task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
+    store = RunStore(settings.run_db)
 
-    code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
-        settings=settings,
-        client=client,
+    run = start_run(
+        "Process the invoices in the AP mailbox",
+        task_pack,
+        context,
+        ScriptedClient([json.dumps(WORK_ORDER), json.dumps(PLAN)]),
+        store,
+        run_id="RUN-0001",
     )
 
-    output = capsys.readouterr().out
-    assert code == 0
-    assert "Work Order" in output
-    assert "SOP: invoice-processing" in output
-    assert "Policies: spend-limits, action-rules" in output
-    assert "Plan" in output
-    assert "step-1" in output
-    assert "stopped in state planned" in output
-
+    assert run.state is RunState.PLANNED
     runs = RunStore(settings.run_db).list_runs()
     assert len(runs) == 1
     assert runs[0].state is RunState.PLANNED
 
 
-def test_run_and_plan_survive_a_process_restart(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_run_and_plan_survive_a_process_restart(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
-    main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
-        settings=settings,
-        client=ScriptedClient([json.dumps(WORK_ORDER), json.dumps(PLAN)]),
+    context = load_company_context(settings.company_dir)
+    task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
+    start_run(
+        "Process the invoices in the AP mailbox",
+        task_pack,
+        context,
+        ScriptedClient([json.dumps(WORK_ORDER), json.dumps(PLAN)]),
+        RunStore(settings.run_db),
+        run_id="RUN-0001",
     )
-    capsys.readouterr()
 
     reopened = RunStore(settings.run_db)
-    run = reopened.list_runs()[0]
-    stored = reopened.get_run(run.id)
+    stored = reopened.get_run("RUN-0001")
 
     assert stored.state is RunState.PLANNED
     assert stored.work_order.policies == ["spend-limits", "action-rules"]

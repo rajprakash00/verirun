@@ -1,17 +1,22 @@
 """Acceptance tests for the Resolve and Plan slice, replayed from recorded LLM fixtures.
 
 Fixtures are recorded with scripts/record_llm_fixtures.py. Replay keeps these
-tests deterministic, offline, and free.
+tests deterministic, offline, and free. The CLI now runs the whole pipeline, so
+these slice tests drive the engine's Resolve and Plan phases directly.
 """
 
 from pathlib import Path
 
 import pytest
 
-from company_operator.cli import main
+from company_operator.cli import format_run, main
 from company_operator.config import Settings
+from company_operator.context.company import load_company_context
+from company_operator.context.task_pack import load_task_pack
+from company_operator.engine.orchestrator import start_run
 from company_operator.engine.states import RunState
-from company_operator.runs.store import RunStore
+from company_operator.llm.client import build_client
+from company_operator.runs.store import RunStore, generate_run_id
 from tests.support import ROOT
 
 FIXTURES = ROOT / "tests" / "fixtures" / "llm"
@@ -28,18 +33,30 @@ def replay_settings(tmp_path: Path) -> Settings:
     )
 
 
-def test_one_line_invoice_request_cites_the_sop_and_the_spend_limit(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def start_replayed_run(settings: Settings, request: str) -> tuple[RunStore, str]:
+    context = load_company_context(settings.company_dir)
+    task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
+    run_id = generate_run_id()
+    store = RunStore(settings.run_db)
+    start_run(
+        request,
+        task_pack,
+        context,
+        build_client(settings, session_id=run_id),
+        store,
+        run_id=run_id,
+    )
+    return store, run_id
+
+
+def test_one_line_invoice_request_cites_the_sop_and_the_spend_limit(tmp_path: Path) -> None:
     settings = replay_settings(tmp_path)
 
-    code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
-        settings=settings,
-    )
+    store, run_id = start_replayed_run(settings, "Process the invoices in the AP mailbox")
+    run = store.get_run(run_id)
+    output = format_run(run)
 
-    output = capsys.readouterr().out
-    assert code == 0
+    assert run.state is RunState.PLANNED
     assert "SOP: invoice-processing" in output
     assert "spend-limits" in output
     assert "over-spend-limit" in output
@@ -47,18 +64,12 @@ def test_one_line_invoice_request_cites_the_sop_and_the_spend_limit(
     assert "stopped in state planned" in output
 
 
-def test_the_planned_run_survives_a_process_restart(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_the_planned_run_survives_a_process_restart(tmp_path: Path) -> None:
     settings = replay_settings(tmp_path)
-    main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
-        settings=settings,
-    )
-    capsys.readouterr()
+    _, run_id = start_replayed_run(settings, "Process the invoices in the AP mailbox")
 
     reopened = RunStore(settings.run_db)
-    run = reopened.get_run(reopened.list_runs()[0].id)
+    run = reopened.get_run(run_id)
 
     assert run.state is RunState.PLANNED
     assert run.work_order.sop == "invoice-processing"
