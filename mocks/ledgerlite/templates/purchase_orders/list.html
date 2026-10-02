@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Purchase orders{% endblock %}
+{% block content %}
+<h1>Purchase orders</h1>
+<table>
+  <thead>
+    <tr><th>Id</th><th>Vendor</th><th>Amount</th><th>Status</th><th>Issued</th></tr>
+  </thead>
+  <tbody>
+    {% for order in orders %}
+    <tr>
+      <td><a href="/purchase-orders/{{ order.id }}">{{ order.id }}</a></td>
+      <td><a href="/vendors/{{ order.vendor_id }}">{{ order.vendor_id }}</a></td>
+      <td>{{ order.amount_cents | money }} {{ order.currency }}</td>
+      <td>{{ order.status }}</td>
+      <td>{{ order.issued_at }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

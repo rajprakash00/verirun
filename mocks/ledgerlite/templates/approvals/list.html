@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Approvals{% endblock %}
+{% block content %}
+<h1>Approvals</h1>
+<table>
+  <thead>
+    <tr><th>Id</th><th>Subject</th><th>Kind</th><th>Status</th><th>Requested</th><th>Decided</th></tr>
+  </thead>
+  <tbody>
+    {% for approval in approvals %}
+    <tr>
+      <td>{{ approval.id }}</td>
+      <td>{{ approval.subject_type }} {{ approval.subject_id }}</td>
+      <td>{{ approval.kind }}</td>
+      <td>{{ approval.status }}</td>
+      <td>{{ approval.requested_at }}</td>
+      <td>{{ approval.decided_at or "pending" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

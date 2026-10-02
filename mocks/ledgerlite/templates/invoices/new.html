@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — New invoice{% endblock %}
+{% block content %}
+<h1>New invoice</h1>
+<form class="invoice" method="post" action="/invoices">
+  <label>Vendor invoice number
+    <input type="text" name="number" required>
+  </label>
+  <label>Vendor
+    <select name="vendor_id" required>
+      {% for vendor in vendors %}
+      <option value="{{ vendor.id }}">{{ vendor.id }} — {{ vendor.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Purchase order
+    <select name="po_id">
+      <option value="">none</option>
+      {% for order in orders %}
+      <option value="{{ order.id }}">{{ order.id }} — {{ order.vendor_id }} — {{ order.amount_cents | money }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Goods receipt
+    <select name="gr_id">
+      <option value="">none</option>
+      {% for receipt in receipts %}
+      <option value="{{ receipt.id }}">{{ receipt.id }} — {{ receipt.po_id }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Amount
+    <input type="text" name="amount" inputmode="decimal" placeholder="1250.00" required>
+  </label>
+  <label>Currency
+    <input type="text" name="currency" value="USD">
+  </label>
+  <button type="submit">File invoice</button>
+</form>
+{% endblock %}

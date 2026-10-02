@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Vendor {{ vendor.id }}{% endblock %}
+{% block content %}
+<h1>{{ vendor.name }}</h1>
+<dl class="detail">
+  <dt>Id</dt><dd>{{ vendor.id }}</dd>
+  <dt>Tax id</dt><dd>{{ vendor.tax_id }}</dd>
+  <dt>Email</dt><dd>{{ vendor.email }}</dd>
+  <dt>Status</dt><dd class="{% if vendor.status == 'blocked' %}status-blocked{% endif %}">{{ vendor.status }}</dd>
+  <dt>Created</dt><dd>{{ vendor.created_at }}</dd>
+</dl>
+<h2>Purchase orders</h2>
+{% if orders %}
+<table>
+  <thead><tr><th>Id</th><th>Amount</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for order in orders %}
+    <tr>
+      <td><a href="/purchase-orders/{{ order.id }}">{{ order.id }}</a></td>
+      <td>{{ order.amount_cents | money }} {{ order.currency }}</td>
+      <td>{{ order.status }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No purchase orders.</p>
+{% endif %}
+{% endblock %}

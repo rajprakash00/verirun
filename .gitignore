@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 *.webm
 *.mp4
+*.db
+mocks/state/

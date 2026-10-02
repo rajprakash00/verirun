@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<table>
+  <thead>
+    <tr><th>Record</th><th>Count</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/invoices">Invoices</a></td><td>{{ counts.invoices }}</td></tr>
+    <tr><td><a href="/vendors">Vendors</a></td><td>{{ counts.vendors }}</td></tr>
+    <tr><td><a href="/purchase-orders">Purchase orders</a></td><td>{{ counts.purchase_orders }}</td></tr>
+    <tr><td><a href="/goods-receipts">Goods receipts</a></td><td>{{ counts.goods_receipts }}</td></tr>
+    <tr><td><a href="/payments">Payments</a></td><td>{{ counts.payments }}</td></tr>
+    <tr><td><a href="/approvals">Approvals</a></td><td>{{ counts.approvals }}</td></tr>
+  </tbody>
+</table>
+{% endblock %}

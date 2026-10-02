@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Purchase order {{ order.id }}{% endblock %}
+{% block content %}
+<h1>Purchase order {{ order.id }}</h1>
+<dl class="detail">
+  <dt>Vendor</dt><dd><a href="/vendors/{{ order.vendor_id }}">{{ order.vendor_id }}</a></dd>
+  <dt>Amount</dt><dd>{{ order.amount_cents | money }} {{ order.currency }}</dd>
+  <dt>Status</dt><dd>{{ order.status }}</dd>
+  <dt>Issued</dt><dd>{{ order.issued_at }}</dd>
+</dl>
+{% endblock %}
