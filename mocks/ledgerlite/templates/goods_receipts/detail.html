@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Goods receipt {{ receipt.id }}{% endblock %}
+{% block content %}
+<h1>Goods receipt {{ receipt.id }}</h1>
+<dl class="detail">
+  <dt>Purchase order</dt><dd><a href="/purchase-orders/{{ receipt.po_id }}">{{ receipt.po_id }}</a></dd>
+  <dt>Amount</dt><dd>{{ receipt.amount_cents | money }} {{ receipt.currency }}</dd>
+  <dt>Status</dt><dd>{{ receipt.status }}</dd>
+  <dt>Received</dt><dd>{{ receipt.received_at }}</dd>
+</dl>
+{% endblock %}

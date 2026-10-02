@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Vendors{% endblock %}
+{% block content %}
+<h1>Vendors</h1>
+<table>
+  <thead>
+    <tr><th>Id</th><th>Name</th><th>Email</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for vendor in vendors %}
+    <tr>
+      <td><a href="/vendors/{{ vendor.id }}">{{ vendor.id }}</a></td>
+      <td>{{ vendor.name }}</td>
+      <td>{{ vendor.email }}</td>
+      <td class="{% if vendor.status == 'blocked' %}status-blocked{% endif %}">{{ vendor.status }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

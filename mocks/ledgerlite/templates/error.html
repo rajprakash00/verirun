@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Error {{ status_code }}{% endblock %}
+{% block content %}
+<h1>Request failed</h1>
+<div class="error">
+  <p><strong>LedgerLite error {{ status_code }}.</strong></p>
+  <p>{{ message }}</p>
+</div>
+<p><a href="/invoices">Back to invoices</a></p>
+{% endblock %}

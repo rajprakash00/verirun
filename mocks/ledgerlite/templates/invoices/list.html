@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}LedgerLite — Invoices{% endblock %}
+{% block content %}
+<h1>Invoices</h1>
+<p><a href="/invoices/new">New invoice</a></p>
+<table>
+  <thead>
+    <tr><th>Id</th><th>Number</th><th>Vendor</th><th>Amount</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for invoice in invoices %}
+    <tr>
+      <td><a href="/invoices/{{ invoice.id }}">{{ invoice.id }}</a></td>
+      <td>{{ invoice.number }}</td>
+      <td>{{ invoice.vendor_name }}</td>
+      <td>{{ invoice.amount_cents | money }} {{ invoice.currency }}</td>
+      <td>{{ invoice.status }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
