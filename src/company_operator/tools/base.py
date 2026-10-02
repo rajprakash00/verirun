@@ -1,0 +1,86 @@
+"""The uniform Tool interface and its mapping to Observations."""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Any, ClassVar
+
+from company_operator.engine.models import ErrorKind, Observation
+
+
+class ToolError(Exception):
+    """A tool failure that carries the Observation error kind to report."""
+
+    def __init__(self, kind: ErrorKind, message: str) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.message = message
+
+
+class Tool(ABC):
+    """One function the Operator can call.
+
+    A Tool declares its name, description, and JSON schema, and turns arguments
+    into exactly one Observation. Failures never raise: they map to an
+    Observation carrying an ``error_kind``.
+    """
+
+    name: ClassVar[str]
+    description: ClassVar[str]
+    parameters: ClassVar[dict[str, Any]]
+    action: ClassVar[str | None] = None
+
+    def invoke(self, args: dict[str, Any] | None = None) -> Observation:
+        arguments = dict(args or {})
+        try:
+            return self.run(arguments)
+        except ToolError as exc:
+            return Observation(ok=False, summary=exc.message, error_kind=exc.kind)
+        except Exception as exc:  # noqa: BLE001 - tools must never raise into the engine
+            return Observation(
+                ok=False,
+                summary=f"{type(exc).__name__}: {exc}",
+                error_kind="unknown",
+            )
+
+    @abstractmethod
+    def run(self, args: dict[str, Any]) -> Observation:
+        """Do the work. Raise ToolError for classified failures."""
+
+    def policy_facts(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Facts the policy gate needs before this tool runs. Read-only."""
+        return {}
+
+    def spec(self) -> dict[str, Any]:
+        """The OpenAI-compatible function definition for the LLM tool loop."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
+
+def require_str(args: dict[str, Any], key: str) -> str:
+    value = args.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ToolError("invalid", f"missing required argument '{key}'")
+    return value
+
+
+def optional_str(args: dict[str, Any], key: str, default: str | None = None) -> str | None:
+    value = args.get(key, default)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ToolError("invalid", f"argument '{key}' must be a string")
+    return value
+
+
+def optional_bool(args: dict[str, Any], key: str, default: bool = False) -> bool:
+    value = args.get(key, default)
+    if not isinstance(value, bool):
+        raise ToolError("invalid", f"argument '{key}' must be a boolean")
+    return value

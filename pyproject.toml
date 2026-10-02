@@ -15,6 +15,7 @@ dependencies = [
     "fpdf2>=2.8.9",
     "pillow>=12.3.0",
     "pyyaml>=6.0.2",
+    "playwright>=1.63.0",
 ]
 
 [dependency-groups]
