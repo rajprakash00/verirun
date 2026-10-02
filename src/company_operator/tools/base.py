@@ -22,13 +22,16 @@ class Tool(ABC):
 
     A Tool declares its name, description, and JSON schema, and turns arguments
     into exactly one Observation. Failures never raise: they map to an
-    Observation carrying an ``error_kind``.
+    Observation carrying an ``error_kind``. Tools that mutate external state set
+    ``side_effect = True`` so the engine journals them and never repeats a
+    completed call.
     """
 
     name: ClassVar[str]
     description: ClassVar[str]
     parameters: ClassVar[dict[str, Any]]
     action: ClassVar[str | None] = None
+    side_effect: ClassVar[bool] = False
 
     def invoke(self, args: dict[str, Any] | None = None) -> Observation:
         arguments = dict(args or {})

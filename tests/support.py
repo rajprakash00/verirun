@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import uvicorn
 
-from company_operator.llm.client import AssistantTurn, Usage
+from company_operator.llm.client import AssistantTurn, ToolCall, Usage
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,9 +92,13 @@ PLAN = {
 
 
 class ScriptedClient:
-    """A deterministic LLMClient for tests."""
+    """A deterministic LLMClient for tests.
 
-    def __init__(self, replies: list[str]) -> None:
+    Replies may be plain text or ready-made ``AssistantTurn`` objects, so a
+    script can drive the Execute tool loop with tool calls and usage.
+    """
+
+    def __init__(self, replies: list[str | AssistantTurn]) -> None:
         self.replies = list(replies)
         self.calls: list[dict] = []
 
@@ -115,7 +119,28 @@ class ScriptedClient:
         )
         if not self.replies:
             raise AssertionError("scripted client ran out of replies")
-        return AssistantTurn(model="scripted", text=self.replies.pop(0), usage=Usage())
+        reply = self.replies.pop(0)
+        if isinstance(reply, AssistantTurn):
+            return reply
+        return AssistantTurn(model="scripted", text=reply, usage=Usage())
+
+
+def text_turn(text: str, *, usage: Usage | None = None) -> AssistantTurn:
+    return AssistantTurn(model="scripted", text=text, usage=usage or Usage())
+
+
+def tool_turn(
+    name: str,
+    arguments: dict | None = None,
+    *,
+    call_id: str = "call-1",
+    usage: Usage | None = None,
+) -> AssistantTurn:
+    return AssistantTurn(
+        model="scripted",
+        tool_calls=[ToolCall(id=call_id, name=name, arguments=arguments or {})],
+        usage=usage or Usage(),
+    )
 
 
 def work_order_json(**overrides) -> str:

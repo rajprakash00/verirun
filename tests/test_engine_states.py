@@ -23,6 +23,7 @@ ALLOWED = [
     (RunState.EXECUTING, RunState.VERIFYING),
     (RunState.EXECUTING, RunState.NEEDS_HUMAN),
     (RunState.EXECUTING, RunState.FAILED),
+    (RunState.EXECUTING, RunState.LIMIT_REACHED),
     (RunState.VERIFYING, RunState.COMPLETED),
     (RunState.VERIFYING, RunState.NEEDS_HUMAN),
     (RunState.VERIFYING, RunState.FAILED),
@@ -45,6 +46,8 @@ REJECTED = [
     (RunState.COMPLETED, RunState.FAILED),
     (RunState.FAILED, RunState.PLANNED),
     (RunState.NEEDS_HUMAN, RunState.COMPLETED),
+    (RunState.LIMIT_REACHED, RunState.EXECUTING),
+    (RunState.LIMIT_REACHED, RunState.COMPLETED),
 ]
 
 

@@ -70,9 +70,17 @@ class ToolRegistry:
     def available(self) -> list[Tool]:
         return [self._tools[name] for name in self._allowlist if name in self._tools]
 
+    def get(self, name: str) -> Tool | None:
+        return self._tools.get(name)
+
     def specs(self) -> list[dict[str, Any]]:
         """Function definitions for the LLM: allowlisted and registered only."""
         return [tool.spec() for tool in self.available()]
+
+    def specs_for(self, names: Iterable[str]) -> list[dict[str, Any]]:
+        """Function definitions the given Step allows, allowlisted and registered only."""
+        wanted = set(names)
+        return [tool.spec() for tool in self.available() if tool.name in wanted]
 
     def invoke(self, name: str, args: dict[str, Any] | None = None) -> Observation:
         arguments = dict(args or {})

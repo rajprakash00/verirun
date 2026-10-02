@@ -20,6 +20,8 @@ class Run(BaseModel):
     work_order: WorkOrder | None = None
     plan: Plan | None = None
     error: str | None = None
+    steps_used: int = 0
+    cost_usd: float = 0.0
     created_at: datetime
     updated_at: datetime
 
@@ -69,6 +71,7 @@ class ObservationRecord(BaseModel):
     id: int
     run_id: str
     step_position: int | None = None
+    tool: str | None = None
     ok: bool
     summary: str
     data: dict[str, Any] = Field(default_factory=dict)
