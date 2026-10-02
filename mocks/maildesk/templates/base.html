@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}MailDesk{% endblock %}</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #f6f7f9; color: #1d2433; }
+    header { background: #123b5e; }
+    nav { max-width: 1000px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+    nav a { color: #cfdce8; text-decoration: none; font-size: 0.92rem; }
+    nav a:hover { color: #fff; }
+    nav .brand { font-weight: 700; color: #fff; margin-right: 12px; }
+    main { max-width: 1000px; margin: 24px auto 48px; padding: 0 16px; }
+    h1 { font-size: 1.4rem; }
+    table { border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 2px rgba(29, 36, 51, 0.08); }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e3e7ee; font-size: 0.92rem; }
+    th { background: #eef1f6; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    tr:last-child td { border-bottom: 0; }
+    a { color: #1c5d99; }
+    .detail { background: #fff; padding: 16px; box-shadow: 0 1px 2px rgba(29, 36, 51, 0.08); display: grid; grid-template-columns: 120px 1fr; gap: 8px 16px; max-width: 760px; }
+    .detail dt { color: #5c6a82; }
+    .detail dd { margin: 0; }
+    .body { background: #fff; padding: 16px; box-shadow: 0 1px 2px rgba(29, 36, 51, 0.08); max-width: 760px; white-space: pre-wrap; font-family: inherit; margin: 16px 0; }
+    .attachments { list-style: none; padding: 0; max-width: 760px; }
+    .attachments li { background: #fff; border-bottom: 1px solid #e3e7ee; padding: 8px 10px; font-size: 0.92rem; }
+    .attachments li:last-child { border-bottom: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <span class="brand">MailDesk</span>
+      <a href="/">Inbox</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

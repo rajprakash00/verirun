@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}MailDesk — Inbox{% endblock %}
+{% block content %}
+<h1>Inbox</h1>
+<table>
+  <thead>
+    <tr><th>From</th><th>Subject</th><th>Received</th><th>Attachments</th></tr>
+  </thead>
+  <tbody>
+    {% for message in messages %}
+    <tr>
+      <td>{{ message.sender_name }}</td>
+      <td><a href="/messages/{{ message.id }}">{{ message.subject }}</a></td>
+      <td>{{ message.received_at }}</td>
+      <td>{{ message.attachment_count }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
