@@ -6,6 +6,7 @@ the executor writes it, then the Verifier inspects real state only.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -390,6 +391,165 @@ def test_an_unknown_check_function_fails_with_a_clear_detail(
     result = store.get_verification("RUN-0001")[0]
     assert not result.ok
     assert "no_such_check" in result.detail
+
+
+def vendor_task_pack() -> TaskPack:
+    return load_task_pack(ROOT / "tasks" / "vendor-onboarding.yaml")
+
+
+def seed_verifying_vendor_run(store: RunStore, run_id: str = "RUN-V001") -> None:
+    store.create_run("Onboard Cascade Fabrication LLC", "vendor-onboarding", run_id=run_id)
+    store.transition(run_id, RunState.RESOLVING)
+    store.transition(run_id, RunState.PLANNED)
+    store.transition(run_id, RunState.EXECUTING)
+    store.transition(run_id, RunState.VERIFYING)
+
+
+VENDOR = {
+    "name": "Cascade Fabrication LLC",
+    "tax_id": "TAX-2001",
+    "email": "accounts@cascade-fabrication.example",
+    "address": "4820 Foundry Way, Portland, OR 97210",
+}
+
+
+def create_vendor(
+    store: RunStore,
+    erp_db: Path,
+    *,
+    run_id: str = "RUN-V001",
+    key: str = "vendor-1",
+    **overrides: Any,
+) -> str:
+    arguments = {**VENDOR, **overrides}
+    tools = ToolRegistry(build_erp_tools(erp_db), allowlist=["erp.create_vendor"])
+    observation = tools.invoke("erp.create_vendor", arguments)
+    assert observation.ok, observation.summary
+    store.record_action(run_id, key, "erp.create_vendor", arguments)
+    store.complete_action(run_id, key, observation.model_dump())
+    return observation.data["vendor_id"]
+
+
+def archive_tax_form(
+    store: RunStore,
+    shared_root: Path,
+    filename: str = "cascade-fabrication-w9.pdf",
+    *,
+    run_id: str = "RUN-V001",
+) -> None:
+    tools = ToolRegistry(build_file_tools(shared_root), allowlist=["files.archive"])
+    arguments = {"path": f"documents/vendor-onboarding/{filename}", "directory": "archive"}
+    observation = tools.invoke("files.archive", arguments)
+    assert observation.ok, observation.summary
+    store.record_action(run_id, "archive-vendor-1", "files.archive", arguments)
+    store.complete_action(run_id, "archive-vendor-1", observation.model_dump())
+
+
+def test_a_created_vendor_passes_with_evidence(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_vendor_run(store)
+    vendor_id = create_vendor(store, ledgerlite_db)
+    archive_tax_form(store, maildesk_state.shared_root)
+
+    run = verify_run(
+        "RUN-V001",
+        vendor_task_pack(),
+        store,
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+    )
+
+    assert run.state is RunState.COMPLETED
+    results = {result.id: result for result in store.get_verification("RUN-V001")}
+    assert {result_id: result.ok for result_id, result in results.items()} == {
+        "vendor-created": True,
+        "tax-document-archived": True,
+    }
+    assert f"erp:{vendor_id}" in results["vendor-created"].evidence
+    assert any(item.startswith("source:") for item in results["vendor-created"].evidence)
+    assert any(item.startswith("file:") for item in results["tax-document-archived"].evidence)
+
+
+def test_identical_tax_form_copies_are_tolerated(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_vendor_run(store)
+    create_vendor(store, ledgerlite_db)
+    source = maildesk_state.shared_root / "documents" / "vendor-onboarding" / "cascade-fabrication-w9.pdf"
+    shutil.copy(source, maildesk_state.shared_root / "documents" / "cascade-fabrication-w9-copy.pdf")
+    archive_tax_form(store, maildesk_state.shared_root)
+
+    run = verify_run(
+        "RUN-V001",
+        vendor_task_pack(),
+        store,
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+    )
+
+    assert run.state is RunState.COMPLETED
+
+
+def test_a_vendor_created_twice_fails_the_uniqueness_check(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_vendor_run(store)
+    vendor_id = create_vendor(store, ledgerlite_db)
+    with ledgerlite.connect(ledgerlite_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO vendors (id, name, tax_id, email, status, created_at, scenario)
+            VALUES ('V-9001', 'Cascade Fabrication', 'TAX-2001', 'other@cascade.example',
+                    'active', '2026-09-06T09:00:00+00:00', 'filed')
+            """
+        )
+        conn.commit()
+    archive_tax_form(store, maildesk_state.shared_root)
+
+    run = verify_run(
+        "RUN-V001",
+        vendor_task_pack(),
+        store,
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+    )
+
+    assert run.state is RunState.FAILED
+    results = {result.id: result for result in store.get_verification("RUN-V001")}
+    assert not results["vendor-created"].ok
+    assert "expected exactly one" in results["vendor-created"].detail
+    assert vendor_id in results["vendor-created"].detail
+
+
+def test_a_vendor_field_that_disagrees_with_the_tax_form_fails(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_vendor_run(store)
+    vendor_id = create_vendor(store, ledgerlite_db)
+    with ledgerlite.connect(ledgerlite_db) as conn:
+        conn.execute(
+            "UPDATE vendors SET email = 'wrong@cascade.example' WHERE id = ?", (vendor_id,)
+        )
+        conn.commit()
+    archive_tax_form(store, maildesk_state.shared_root)
+
+    run = verify_run(
+        "RUN-V001",
+        vendor_task_pack(),
+        store,
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+    )
+
+    assert run.state is RunState.FAILED
+    results = {result.id: result for result in store.get_verification("RUN-V001")}
+    assert not results["vendor-created"].ok
+    assert "email" in results["vendor-created"].detail
 
 
 def test_verifying_a_run_that_is_not_verifying_is_a_no_op(

@@ -1,0 +1,13 @@
+id: vendor-management
+title: Vendor management
+description: >-
+  Rules for changing the vendor master data. A vendor record is master data
+  that other records point at, so creating one is never automatic.
+rules:
+  - id: vendor-creation-needs-approval
+    description: >-
+      Creating a vendor is irreversible and must be prepared, then approved by
+      a human before submission.
+    effect: require_approval
+    actions:
+      - vendor.create

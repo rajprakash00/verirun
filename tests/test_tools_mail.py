@@ -24,8 +24,8 @@ def test_list_returns_the_inbox_newest_first_with_attachment_counts(
 
     assert observation.ok
     messages = observation.data["messages"]
-    assert len(messages) == 9
-    assert messages[0]["id"] == "MSG-7009"
+    assert len(messages) == 11
+    assert messages[0]["id"] == "MSG-7011"
     batch = next(message for message in messages if message["id"] == "MSG-7001")
     assert batch["subject"] == "Invoice batch for processing — September"
     assert batch["attachment_count"] == 7

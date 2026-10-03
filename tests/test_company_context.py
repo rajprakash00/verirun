@@ -133,3 +133,8 @@ def test_shipped_company_context_matches_the_task_pack() -> None:
     )
     assert decision.outcome == "require_approval"
     assert decision.rule == "approval-threshold"
+
+    vendor_decision = context.policies.evaluate("vendor.create", {"system": "ledgerlite"})
+    assert vendor_decision.outcome == "require_approval"
+    assert vendor_decision.policy == "vendor-management"
+    assert vendor_decision.rule == "vendor-creation-needs-approval"

@@ -19,6 +19,7 @@ ALL_TOOLS = [
     "erp.get_goods_receipt",
     "erp.list_invoices",
     "erp.get_invoice",
+    "erp.create_vendor",
     "erp.file_invoice",
     "erp.schedule_payment",
 ]
@@ -262,12 +263,82 @@ def test_schedule_payment_policy_facts_read_the_vendor_status(ledgerlite_db: Pat
     }
 
 
+def test_create_vendor_writes_an_active_vendor_with_the_extracted_fields(
+    ledgerlite_db: Path,
+) -> None:
+    tools = registry(ledgerlite_db)
+
+    observation = tools.invoke(
+        "erp.create_vendor",
+        {
+            "name": "Cascade Fabrication LLC",
+            "tax_id": "TAX-2001",
+            "email": "accounts@cascade-fabrication.example",
+            "address": "4820 Foundry Way, Portland, OR 97210",
+        },
+    )
+
+    assert observation.ok
+    assert observation.data["vendor_id"] == "V-1009"
+    assert observation.data["status"] == "active"
+    rows = fetch(ledgerlite_db, "SELECT * FROM vendors WHERE id = 'V-1009'")
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Cascade Fabrication LLC"
+    assert rows[0]["tax_id"] == "TAX-2001"
+    assert rows[0]["email"] == "accounts@cascade-fabrication.example"
+    assert rows[0]["address"] == "4820 Foundry Way, Portland, OR 97210"
+    assert rows[0]["scenario"] == "filed"
+    assert fetch(ledgerlite_db, "SELECT * FROM vendors WHERE id = 'V-1010'") == []
+
+
+def test_create_vendor_rejects_a_duplicate_tax_id_or_name(ledgerlite_db: Path) -> None:
+    tools = registry(ledgerlite_db)
+
+    by_tax_id = tools.invoke(
+        "erp.create_vendor",
+        {
+            "name": "Apex Office Supply Co",
+            "tax_id": "TAX-1002",
+            "email": "billing@apex.example",
+            "address": "1 Apex Way",
+        },
+    )
+    by_name = tools.invoke(
+        "erp.create_vendor",
+        {
+            "name": "Contoso Industrial",
+            "tax_id": "TAX-9999",
+            "email": "ap@contoso.example",
+            "address": "1 Contoso Way",
+        },
+    )
+
+    assert by_tax_id.error_kind == "invalid"
+    assert by_tax_id.data["duplicate"] is True
+    assert by_tax_id.data["existing_vendor_id"] == "V-1002"
+    assert by_name.error_kind == "invalid"
+    assert by_name.data["existing_vendor_id"] == "V-1000"
+    assert fetch(ledgerlite_db, "SELECT * FROM vendors WHERE tax_id = 'TAX-9999'") == []
+
+
+def test_create_vendor_policy_facts_name_the_system(ledgerlite_db: Path) -> None:
+    tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
+
+    facts = tools["erp.create_vendor"].policy_facts(
+        {"name": "Cascade Fabrication LLC", "tax_id": "TAX-2001", "email": "x@example.com"}
+    )
+
+    assert facts == {"system": "ledgerlite"}
+
+
 def test_mutating_erp_tools_are_journaled_side_effects(ledgerlite_db: Path) -> None:
     tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
 
     assert tools["erp.file_invoice"].side_effect
     assert tools["erp.schedule_payment"].side_effect
+    assert tools["erp.create_vendor"].side_effect
     assert tools["erp.schedule_payment"].action == "payment.schedule"
+    assert tools["erp.create_vendor"].action == "vendor.create"
     assert not tools["erp.get_invoice"].side_effect
 
 
@@ -275,5 +346,6 @@ def test_scheduling_a_payment_is_marked_irreversible(ledgerlite_db: Path) -> Non
     tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
 
     assert tools["erp.schedule_payment"].irreversible
+    assert tools["erp.create_vendor"].irreversible
     assert not tools["erp.file_invoice"].irreversible
     assert not tools["erp.get_invoice"].irreversible

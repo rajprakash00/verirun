@@ -238,3 +238,21 @@ def test_shipped_invoice_pack_is_valid() -> None:
     assert "files.extract" in pack.tools
     assert pack.extraction is not None
     assert 0.0 <= pack.extraction.confidence_threshold <= 1.0
+
+
+def test_shipped_vendor_onboarding_pack_is_valid() -> None:
+    from company_operator.context.company import load_company_context
+
+    root = Path(__file__).resolve().parents[1]
+    pack = load_task_pack(root / "tasks" / "vendor-onboarding.yaml")
+    context = load_company_context(root / "company")
+
+    assert pack.id == "vendor-onboarding"
+    assert pack.sop in context.sops
+    for policy in pack.policies:
+        assert policy in context.policies
+    assert "erp.create_vendor" in pack.tools
+    assert pack.extraction is None
+    check_ids = [check.id for check in pack.verification]
+    assert check_ids == ["vendor-created", "tax-document-archived"]
+    assert pack.approval_rules[0].actions == ["vendor.create"]

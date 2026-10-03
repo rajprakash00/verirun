@@ -1,7 +1,7 @@
 """ERP tools: read and write LedgerLite, the internal system of record.
 
-Reads answer from the same SQLite database the LedgerLite app serves. The two
-write tools mirror the UI's behaviour: ``erp.file_invoice`` consumes a seeded
+Reads answer from the same SQLite database the LedgerLite app serves. The write
+tools mirror the UI's behaviour: ``erp.file_invoice`` consumes a seeded
 transient-failure flag before inserting, and ``erp.schedule_payment`` reports
 the vendor status and amount the policy gate needs before it runs.
 """
@@ -257,6 +257,86 @@ class GetInvoiceTool(ErpTool):
         )
 
 
+class CreateVendorTool(ErpTool):
+    name = "erp.create_vendor"
+    description = (
+        "Create a vendor in LedgerLite from a validated tax form. A vendor with "
+        "the same tax id or name is rejected; tax ids are never invented."
+    )
+    side_effect = True
+    irreversible = True
+    action = "vendor.create"
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "The vendor's legal name."},
+            "tax_id": {"type": "string", "description": "The tax id from the tax form."},
+            "email": {"type": "string", "description": "The vendor's accounts contact email."},
+            "address": {"type": "string", "description": "The vendor's address from the tax form."},
+        },
+        "required": ["name", "tax_id", "email", "address"],
+        "additionalProperties": False,
+    }
+
+    def run(self, args: dict[str, Any]) -> Observation:
+        name = require_str(args, "name")
+        tax_id = require_str(args, "tax_id")
+        email = require_str(args, "email")
+        address = require_str(args, "address")
+        with closing(self.connect()) as conn:
+            existing = conn.execute(
+                "SELECT id, status, tax_id FROM vendors WHERE tax_id = ? OR name = ? ORDER BY id",
+                (tax_id, name),
+            ).fetchall()
+            if existing:
+                match = next(
+                    (row for row in existing if row["tax_id"] == tax_id), existing[0]
+                )
+                matched_on = "tax id" if match["tax_id"] == tax_id else "name"
+                raise ToolError(
+                    "invalid",
+                    f"A vendor with the same {matched_on} already exists: {match['id']}",
+                    data={
+                        "duplicate": True,
+                        "existing_vendor_id": match["id"],
+                        "existing_status": match["status"],
+                        "name": name,
+                        "tax_id": tax_id,
+                    },
+                )
+            vendor_id = _next_id(conn, "vendors", "V")
+            conn.execute(
+                """
+                INSERT INTO vendors (id, name, tax_id, email, address, status, created_at, scenario)
+                VALUES (?, ?, ?, ?, ?, 'active', ?, 'filed')
+                """,
+                (
+                    vendor_id,
+                    name,
+                    tax_id,
+                    email,
+                    address,
+                    datetime.now(UTC).isoformat(timespec="seconds"),
+                ),
+            )
+            conn.commit()
+        return Observation(
+            ok=True,
+            summary=f"Created vendor {vendor_id} ({name}) with tax id {tax_id}",
+            data={
+                "vendor_id": vendor_id,
+                "name": name,
+                "tax_id": tax_id,
+                "email": email,
+                "address": address,
+                "status": "active",
+            },
+        )
+
+    def policy_facts(self, args: dict[str, Any]) -> dict[str, Any]:
+        return {"system": "ledgerlite"}
+
+
 class FileInvoiceTool(ErpTool):
     name = "erp.file_invoice"
     description = (
@@ -501,6 +581,7 @@ def build_erp_tools(db_path: str | Path) -> list[Tool]:
         GetGoodsReceiptTool(db_path),
         ListInvoicesTool(db_path),
         GetInvoiceTool(db_path),
+        CreateVendorTool(db_path),
         FileInvoiceTool(db_path),
         SchedulePaymentTool(db_path),
     ]

@@ -18,7 +18,11 @@ from mocks.seed import documents, scenarios
 TREE_DIRS = ("documents", "archive", "processed")
 
 BATCH_RECEIVED_AT = "2026-09-06T08:15:00+00:00"
-ONBOARDING_RECEIVED_AT = "2026-09-06T09:05:00+00:00"
+ONBOARDING_RECEIVED_AT = {
+    "vendor_onboarding": "2026-09-06T09:05:00+00:00",
+    "vendor_duplicate": "2026-09-06T09:11:00+00:00",
+    "vendor_missing_tax_form": "2026-09-06T09:18:00+00:00",
+}
 VENDOR_RECEIVED_AT = {
     "duplicate": "2026-09-05T10:02:00+00:00",
     "amount_mismatch": "2026-09-05T10:17:00+00:00",
@@ -127,7 +131,8 @@ def message_specs() -> tuple[MessageSpec, ...]:
     specs = [_batch_message("MSG-7001", batch_scenarios)]
     for index, scenario in enumerate(failure_scenarios):
         specs.append(_invoice_message(f"MSG-{7002 + index:04d}", scenario))
-    specs.append(_onboarding_message("MSG-7009"))
+    for index, vendor in enumerate(scenarios.VENDOR_SCENARIOS):
+        specs.append(_onboarding_message(f"MSG-{7009 + index:04d}", vendor))
     return tuple(specs)
 
 
@@ -197,8 +202,33 @@ def _invoice_message(message_id: str, scenario: scenarios.InvoiceScenario) -> Me
     )
 
 
-def _onboarding_message(message_id: str) -> MessageSpec:
-    vendor = scenarios.VENDOR_ONBOARDING
+def _onboarding_message(
+    message_id: str, vendor: scenarios.VendorOnboardingScenario
+) -> MessageSpec:
+    if vendor.tax_form_filename is None:
+        body = (
+            "Hello,\n\n"
+            f"Please set up {vendor.company_name} as a new supplier. I will send "
+            "our completed W-9 separately, as soon as our accountant has signed "
+            "it. I am the accounts contact on our side.\n\n"
+            "Thank you,\n"
+            f"{vendor.contact_name}"
+        )
+        attachments: tuple[AttachmentSpec, ...] = ()
+    else:
+        body = (
+            "Hello,\n\n"
+            f"Please set up {vendor.company_name} as a new supplier. Our completed "
+            "W-9 is attached. I am the accounts contact on our side.\n\n"
+            "Thank you,\n"
+            f"{vendor.contact_name}"
+        )
+        attachments = (
+            AttachmentSpec(
+                filename=vendor.tax_form_filename,
+                path=documents.tax_form_relpath(vendor),
+            ),
+        )
     return MessageSpec(
         id=message_id,
         folder="inbox",
@@ -206,19 +236,8 @@ def _onboarding_message(message_id: str) -> MessageSpec:
         sender_email=vendor.contact_email,
         recipients=PROCUREMENT_MAILBOX,
         subject=f"New supplier setup — {vendor.company_name}",
-        body=(
-            "Hello,\n\n"
-            f"Please set up {vendor.company_name} as a new supplier. Our completed "
-            "W-9 is attached. I am the accounts contact on our side.\n\n"
-            "Thank you,\n"
-            f"{vendor.contact_name}"
-        ),
-        received_at=ONBOARDING_RECEIVED_AT,
+        body=body,
+        received_at=ONBOARDING_RECEIVED_AT[vendor.key],
         scenario=vendor.key,
-        attachments=(
-            AttachmentSpec(
-                filename=vendor.tax_form_filename,
-                path=documents.tax_form_relpath(vendor),
-            ),
-        ),
+        attachments=attachments,
     )
