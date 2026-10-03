@@ -16,10 +16,35 @@ import pytest
 
 from company_operator.cli import main
 from company_operator.config import Settings
+from company_operator.engine.adapt import FailureAction, classify_failure
+from company_operator.engine.models import Observation
 from company_operator.engine.states import RunState
 from company_operator.runs.store import RunStore
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import ROOT, WORK_ORDER, ScriptedClient, text_turn, tool_turn
+
+
+def test_a_low_confidence_extraction_escalates_immediately() -> None:
+    observation = Observation(
+        ok=False,
+        summary="the scan has fields below the confidence threshold 0.80: amount (0.42)",
+        error_kind="invalid",
+        data={
+            "low_confidence": True,
+            "low_confidence_fields": ["amount"],
+            "threshold": 0.8,
+            "fields": {"amount_cents": {"value": 105_000, "confidence": 0.42}},
+        },
+    )
+
+    decision = classify_failure(
+        observation, failed_attempts=0, transient_attempts=0, replans_used=0
+    )
+
+    assert decision.action is FailureAction.ESCALATE
+    assert "low-confidence" in decision.reason
+    assert "amount" in decision.reason
+    assert decision.context["low_confidence_fields"] == ["amount"]
 
 
 def settings_for(tmp_path: Path, ledgerlite_db: Path, maildesk_state) -> Settings:

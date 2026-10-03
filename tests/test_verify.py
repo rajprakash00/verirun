@@ -15,7 +15,7 @@ from company_operator.engine.verify import verify_run
 from company_operator.runs.store import RunStore
 from company_operator.tools import ToolRegistry, build_erp_tools, build_file_tools
 from mocks.ledgerlite import db as ledgerlite
-from tests.support import ROOT
+from tests.support import ROOT, ScriptedClient, vision_fields
 
 INVOICE = {
     "number": "NW-2026-001",
@@ -23,6 +23,14 @@ INVOICE = {
     "amount": 1250.00,
     "po_id": "PO-2001",
     "gr_id": "GR-2501",
+}
+
+SCAN = {
+    "number": "PP-2026-042",
+    "vendor_id": "V-1008",
+    "amount": 1050.00,
+    "po_id": "PO-2008",
+    "gr_id": "GR-2508",
 }
 
 
@@ -400,3 +408,74 @@ def test_verifying_a_run_that_is_not_verifying_is_a_no_op(
 
     assert run.state is RunState.CREATED
     assert store.get_verification("RUN-0001") == []
+
+
+def test_a_scanned_invoice_verifies_against_the_verifiers_own_read(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    invoice_id = file_invoice(store, ledgerlite_db, **SCAN)
+    schedule_payment(store, ledgerlite_db, invoice_id)
+    archive_source(store, maildesk_state.shared_root, SCAN["number"])
+
+    run = verify_run(
+        "RUN-0001",
+        task_pack(),
+        store,
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+        client=ScriptedClient([vision_fields()]),
+    )
+
+    assert run.state is RunState.COMPLETED
+    results = {result.id: result for result in store.get_verification("RUN-0001")}
+    assert results["invoice-filed"].ok
+    assert any(item.startswith("extraction:") for item in results["invoice-filed"].evidence)
+
+
+def test_a_scanned_invoice_without_a_vision_client_fails(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    invoice_id = file_invoice(store, ledgerlite_db, **SCAN)
+    schedule_payment(store, ledgerlite_db, invoice_id)
+    archive_source(store, maildesk_state.shared_root, SCAN["number"])
+
+    run = verify_run(
+        "RUN-0001",
+        task_pack(),
+        store,
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+    )
+
+    assert run.state is RunState.FAILED
+    results = {result.id: result for result in store.get_verification("RUN-0001")}
+    assert not results["invoice-filed"].ok
+    assert "no vision model client" in results["invoice-filed"].detail
+
+
+def test_a_low_confidence_verifier_read_does_not_verify(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    invoice_id = file_invoice(store, ledgerlite_db, **SCAN)
+    schedule_payment(store, ledgerlite_db, invoice_id)
+    archive_source(store, maildesk_state.shared_root, SCAN["number"])
+
+    run = verify_run(
+        "RUN-0001",
+        task_pack(),
+        store,
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+        client=ScriptedClient([vision_fields(amount=0.4)]),
+    )
+
+    assert run.state is RunState.FAILED
+    results = {result.id: result for result in store.get_verification("RUN-0001")}
+    assert not results["invoice-filed"].ok
+    assert "below the confidence threshold" in results["invoice-filed"].detail

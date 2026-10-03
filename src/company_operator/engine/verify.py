@@ -20,8 +20,10 @@ from typing import Any
 from company_operator.context.task_pack import TaskPack
 from company_operator.engine.models import CheckResult
 from company_operator.engine.states import RunState
+from company_operator.llm.client import LLMClient
 from company_operator.runs.models import JournalEntry, Run
 from company_operator.runs.store import RunStore
+from company_operator.tools.vision import read_scanned_invoice
 
 FILE_FIELD = re.compile(r"^Vendor:\s*(.+)$", re.MULTILINE)
 NUMBER_FIELD = re.compile(r"^Invoice number:\s*(\S+)$", re.MULTILINE)
@@ -45,6 +47,8 @@ class VerificationContext:
     store: RunStore
     erp_db_path: Path
     shared_root: Path
+    confidence_threshold: float | None = None
+    client: LLMClient | None = None
 
 
 CheckFunction = Callable[[dict[str, Any], VerificationContext], CheckOutcome]
@@ -118,6 +122,23 @@ def _parse_source(path: Path) -> dict[str, Any]:
     }
 
 
+def _verifier_scan(
+    context: VerificationContext, source: Path
+) -> tuple[dict[str, Any] | None, float | None, str | None]:
+    """Read a scanned source with the Verifier's own vision call.
+
+    A scan has no text layer, so the Verifier renders the file and asks the
+    vision model itself. It never reads the executor's extraction; it checks the
+    source document, and only trusts its own read when every confidence clears
+    the Task Pack's threshold. Returns (parsed fields, lowest confidence, problem).
+    """
+    if context.client is None:
+        return None, None, "the Verifier has no vision model client to read the scan"
+    if context.confidence_threshold is None:
+        return None, None, "the Task Pack sets no extraction confidence threshold"
+    return read_scanned_invoice(context.client, source, context.confidence_threshold)
+
+
 def check_erp_invoice_matches(
     params: dict[str, Any], context: VerificationContext
 ) -> CheckOutcome:
@@ -140,12 +161,20 @@ def check_erp_invoice_matches(
         if source is None:
             failures.append(f"no source document found for invoice {invoice['number']}")
             continue
+        reference = source.relative_to(context.shared_root).as_posix()
+        extraction_evidence: str | None = None
         try:
             parsed = _parse_source(source)
         except Exception as exc:  # noqa: BLE001 - a broken source is a failed check, not a crash
-            failures.append(f"cannot read source document {source.name}: {exc}")
-            continue
-        reference = source.relative_to(context.shared_root).as_posix()
+            parsed, minimum, problem = _verifier_scan(context, source)
+            if problem is not None:
+                failures.append(
+                    f"cannot read source document {source.name}: {exc}; {problem}"
+                )
+                continue
+            assert minimum is not None
+            extraction_evidence = f"extraction:{reference}@{minimum:.2f}"
+        assert parsed is not None
         if "invoice_number" in match_fields and parsed["number"] != invoice["number"]:
             failures.append(
                 f"{invoice['id']}: LedgerLite number {invoice['number']} != source {parsed['number']}"
@@ -165,6 +194,8 @@ def check_erp_invoice_matches(
         failures.extend(_reference_failures(context, invoice))
         if not any(failure.startswith(invoice["id"]) for failure in failures):
             evidence.extend([f"erp:{invoice['id']}", f"source:{reference}"])
+            if extraction_evidence is not None:
+                evidence.append(extraction_evidence)
     if failures:
         return CheckOutcome(False, "; ".join(failures), tuple(evidence))
     return CheckOutcome(
@@ -309,6 +340,7 @@ def verify_run(
     *,
     erp_db_path: str | Path,
     shared_root: str | Path,
+    client: LLMClient | None = None,
 ) -> Run:
     """Run every verification check and move the Run to its verified outcome."""
     run = store.get_run(run_id)
@@ -319,6 +351,10 @@ def verify_run(
         store=store,
         erp_db_path=Path(erp_db_path),
         shared_root=Path(shared_root),
+        confidence_threshold=(
+            task_pack.extraction.confidence_threshold if task_pack.extraction else None
+        ),
+        client=client,
     )
     results: list[CheckResult] = []
     for check in task_pack.verification:

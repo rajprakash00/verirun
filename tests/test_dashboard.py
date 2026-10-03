@@ -67,7 +67,7 @@ def escalate_run(tmp_path: Path, ledgerlite_db: Path, maildesk_state) -> tuple[o
         context,
         script,
         store,
-        build_registry(settings, context, task_pack),
+        build_registry(settings, context, task_pack, script),
         erp_db_path=ledgerlite_db,
         shared_root=maildesk_state.shared_root,
         evidence_root=settings.run_db.parent,

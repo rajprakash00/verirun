@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from company_operator.config import ModelRole
-from company_operator.llm.client import LLMClient, Message
+from company_operator.llm.client import AssistantTurn, LLMClient, Message
 from company_operator.validation import format_validation_errors
 
 FENCED_JSON = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
@@ -36,6 +36,7 @@ def complete_structured[ModelT: BaseModel](
     model_role: ModelRole = "reason",
     repair_attempts: int = 1,
     validate: Callable[[ModelT], str | None] | None = None,
+    on_turn: Callable[[AssistantTurn], None] | None = None,
 ) -> ModelT:
     conversation = [dict(message) for message in messages]
     last_problem = "the model returned an empty reply"
@@ -45,6 +46,8 @@ def complete_structured[ModelT: BaseModel](
             model_role=model_role,
             response_format={"type": "json_object"},
         )
+        if on_turn is not None:
+            on_turn(turn)
         text = (turn.text or "").strip()
         try:
             model = schema.model_validate(extract_json(text))

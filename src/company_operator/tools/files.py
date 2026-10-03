@@ -49,6 +49,16 @@ class FileTool(Tool):
         target.unlink()
 
 
+def read_pdf_text(path: Path) -> tuple[str, int]:
+    """Extract the text layer of a PDF: the joined text and the page count."""
+    try:
+        reader = PdfReader(str(path))
+        pages = [page.extract_text() or "" for page in reader.pages]
+    except Exception as exc:
+        raise ToolError("invalid", f"cannot read PDF '{path.name}': {exc}") from exc
+    return "\n".join(pages), len(pages)
+
+
 class ListFilesTool(FileTool):
     name = "files.list"
     description = "List the files and directories inside a directory of the shared file tree."
@@ -102,11 +112,25 @@ class ReadFileTool(FileTool):
         relative = require_str(args, "path")
         path = self.existing(relative, kind="file")
         if path.suffix.lower() == ".pdf":
-            text, pages = self._read_pdf(relative, path)
+            text, pages = read_pdf_text(path)
+            text_layer = bool(text.strip())
+            summary = (
+                f"Read {pages} page(s) of PDF text from '{relative}'"
+                if text_layer
+                else (
+                    f"Read {pages} page(s) from '{relative}' with no text layer; "
+                    "use files.extract for the vision path"
+                )
+            )
             return Observation(
                 ok=True,
-                summary=f"Read {pages} page(s) of PDF text from '{relative}'",
-                data={"path": self.relative(path), "text": text, "pages": pages},
+                summary=summary,
+                data={
+                    "path": self.relative(path),
+                    "text": text,
+                    "pages": pages,
+                    "text_layer": text_layer,
+                },
             )
         try:
             text = path.read_text(encoding="utf-8")
@@ -117,15 +141,6 @@ class ReadFileTool(FileTool):
             summary=f"Read {len(text)} characters from '{relative}'",
             data={"path": self.relative(path), "text": text},
         )
-
-    @staticmethod
-    def _read_pdf(relative: str, path: Path) -> tuple[str, int]:
-        try:
-            reader = PdfReader(str(path))
-            pages = [page.extract_text() or "" for page in reader.pages]
-        except Exception as exc:
-            raise ToolError("invalid", f"cannot read PDF '{relative}': {exc}") from exc
-        return "\n".join(pages), len(pages)
 
 
 class WriteFileTool(FileTool):

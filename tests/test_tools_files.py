@@ -184,6 +184,18 @@ def test_read_extracts_text_from_a_pdf(root: Path, tools: dict[str, Tool]) -> No
     assert read.ok
     assert "NW-2026-001" in read.data["text"]
     assert read.data["pages"] == 1
+    assert read.data["text_layer"] is True
+
+
+def test_read_reports_a_scanned_pdf_without_a_text_layer(maildesk_state) -> None:
+    tools = {tool.name: tool for tool in build_file_tools(maildesk_state.shared_root)}
+
+    read = tools["files.read"].invoke({"path": "documents/invoices/PP-2026-042.pdf"})
+
+    assert read.ok
+    assert read.data["text"] == ""
+    assert read.data["text_layer"] is False
+    assert "files.extract" in read.summary
 
 
 def test_missing_argument_is_invalid(tools: dict[str, Tool]) -> None:

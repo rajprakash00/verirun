@@ -111,6 +111,7 @@ def run_task(
                 store,
                 erp_db_path=erp_db_path,
                 shared_root=shared_root,
+                client=client,
             )
     finally:
         try:
@@ -163,6 +164,7 @@ def resume_run(
             store,
             erp_db_path=erp_db_path,
             shared_root=shared_root,
+            client=client,
         )
     report_run(run_id, store, evidence_root)
     return store.get_run(run_id)

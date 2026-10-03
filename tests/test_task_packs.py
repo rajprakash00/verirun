@@ -50,6 +50,40 @@ def test_valid_pack_loads(tmp_path: Path) -> None:
     assert pack.verification[0].params == {"match": ["invoice_number"]}
 
 
+def test_extraction_threshold_is_optional_and_parses(tmp_path: Path) -> None:
+    pack = load_task_pack(write_pack(tmp_path, VALID))
+    assert pack.extraction is None
+
+    with_threshold = VALID + "\nextraction:\n  confidence_threshold: 0.8\n"
+    pack = load_task_pack(write_pack(tmp_path, with_threshold))
+
+    assert pack.extraction is not None
+    assert pack.extraction.confidence_threshold == 0.8
+
+
+@pytest.mark.parametrize("threshold", ["1.5", "-0.1", "not-a-number"])
+def test_extraction_threshold_must_be_a_probability(tmp_path: Path, threshold: str) -> None:
+    text = VALID + f"\nextraction:\n  confidence_threshold: {threshold}\n"
+
+    with pytest.raises(TaskPackError) as excinfo:
+        load_task_pack(write_pack(tmp_path, text))
+
+    assert "confidence_threshold" in str(excinfo.value)
+
+
+def test_files_extract_requires_an_extraction_threshold(tmp_path: Path) -> None:
+    text = VALID.replace(
+        "tools:\n  - files.read\n  - erp.file_invoice",
+        "tools:\n  - files.read\n  - files.extract\n  - erp.file_invoice",
+    )
+
+    with pytest.raises(TaskPackError) as excinfo:
+        load_task_pack(write_pack(tmp_path, text))
+
+    assert "files.extract" in str(excinfo.value)
+    assert "confidence_threshold" in str(excinfo.value)
+
+
 def test_minimal_pack_loads_with_empty_optionals(tmp_path: Path) -> None:
     pack = load_task_pack(
         write_pack(
@@ -201,3 +235,6 @@ def test_shipped_invoice_pack_is_valid() -> None:
     assert pack.sop in context.sops
     for policy in pack.policies:
         assert policy in context.policies
+    assert "files.extract" in pack.tools
+    assert pack.extraction is not None
+    assert 0.0 <= pack.extraction.confidence_threshold <= 1.0

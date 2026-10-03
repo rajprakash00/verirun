@@ -14,6 +14,7 @@ tools:
   - mail.mark_read
   - files.list
   - files.read
+  - files.extract
   - files.write
   - files.move
   - files.archive
@@ -48,6 +49,8 @@ approval_rules:
     policy: action-rules
     actions:
       - payment.schedule
+extraction:
+  confidence_threshold: 0.8
 verification:
   - id: invoice-filed
     description: The invoice exists in LedgerLite against the right vendor and amount.
