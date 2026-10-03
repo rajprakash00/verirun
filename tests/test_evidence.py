@@ -112,6 +112,43 @@ def test_evidence_for_an_unverified_run_reports_its_state(tmp_path: Path) -> Non
     assert evidence["artifacts"] == []
 
 
+def test_evidence_carries_approval_requests_and_decisions(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    store.create_run("Process the invoices", "invoice-processing", run_id="RUN-0004")
+    store.transition("RUN-0004", RunState.RESOLVING)
+    store.save_work_order("RUN-0004", WorkOrder.model_validate(WORK_ORDER))
+    store.save_plan("RUN-0004", Plan.model_validate(json.loads(PLAN)))
+    store.transition("RUN-0004", RunState.PLANNED)
+    store.transition("RUN-0004", RunState.EXECUTING)
+    request = store.create_approval(
+        "RUN-0004",
+        key="step-3:erp.schedule_payment:abcd1234",
+        step_position=2,
+        step_id="step-3",
+        tool="erp.schedule_payment",
+        action="payment.schedule",
+        arguments={"invoice_id": "INV-3003"},
+        policy="spend-limits",
+        rule="approval-threshold",
+        reason="Any payment above 10,000.00 USD must be held at an approval gate.",
+    )
+    store.transition("RUN-0004", RunState.AWAITING_APPROVAL)
+    store.decide_approval(request.id, approved=True)
+    run = store.get_run("RUN-0004")
+
+    evidence = build_evidence(run, store)
+
+    assert evidence["state"] == "awaiting_approval"
+    assert len(evidence["approvals"]) == 1
+    approval = evidence["approvals"][0]
+    assert approval["tool"] == "erp.schedule_payment"
+    assert approval["action"] == "payment.schedule"
+    assert approval["arguments"] == {"invoice_id": "INV-3003"}
+    assert approval["status"] == "approved"
+    assert approval["decided_at"] is not None
+    assert approval["executed_at"] is None
+
+
 def test_evidence_carries_the_escalation_and_its_open_question(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "runs" / "operator.db")
     store.create_run("Process the invoices", "invoice-processing", run_id="RUN-0003")

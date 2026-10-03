@@ -16,6 +16,8 @@ Shared vocabulary for this project. A glossary only. No implementation details.
 
 **Approval Gate** — a point where the Operator stops and waits for a human yes/no.
 
+**Approval Request** — a prepared irreversible action waiting for a human yes/no. Approving submits it; rejecting aborts the Run with the reason.
+
 **Escalation** — asking a human for help when the Operator cannot continue safely.
 
 **Tool** — one function the Operator can call.

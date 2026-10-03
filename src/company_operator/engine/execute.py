@@ -34,16 +34,17 @@ from company_operator.engine.adapt import (
     FailureDecision,
     classify_failure,
 )
+from company_operator.engine.approve import prepare_approval
 from company_operator.engine.models import Observation, Step
 from company_operator.engine.plan import plan_run
 from company_operator.engine.states import RunState, StepState
 from company_operator.llm.client import AssistantTurn, LLMClient, Message, ToolCall
 from company_operator.llm.meter import CostMeter
-from company_operator.runs.models import Run
-from company_operator.runs.store import RunStore
 
 if TYPE_CHECKING:
     from company_operator.context.task_pack import TaskPack
+    from company_operator.runs.models import Run
+    from company_operator.runs.store import RunStore
     from company_operator.tools.registry import ToolRegistry
 
 EXECUTE_SYSTEM_PROMPT = """\
@@ -71,6 +72,14 @@ def action_key(step_id: str, tool: str, args: dict[str, Any]) -> str:
     payload = json.dumps(args, sort_keys=True, separators=(",", ":"), default=str)
     digest = sha256(payload.encode("utf-8")).hexdigest()[:16]
     return f"{step_id}:{tool}:{digest}"
+
+
+def _approval_required(observation: Observation) -> bool:
+    """True when the policy gate prepared this action for a human instead of running it."""
+    return (
+        observation.error_kind == "policy"
+        and observation.data.get("approval_required") is True
+    )
 
 
 class RunBudget:
@@ -126,6 +135,7 @@ class StepOutcome(StrEnum):
     DONE = "done"
     ESCALATED = "escalated"
     REPLAN = "replan"
+    PARKED = "parked"
 
 
 def execute_run(
@@ -155,6 +165,10 @@ def execute_run(
         run = store.transition(run_id, RunState.EXECUTING)
     elif run.state is RunState.NEEDS_HUMAN:
         store.resolve_escalations(run_id)
+        run = store.transition(run_id, RunState.EXECUTING)
+    elif run.state is RunState.AWAITING_APPROVAL:
+        if store.open_approval(run_id) is not None:
+            return run
         run = store.transition(run_id, RunState.EXECUTING)
     if run.state is not RunState.EXECUTING:
         return run
@@ -232,7 +246,7 @@ class _Executor:
                 position += 1
                 continue
             outcome = self._execute_step(position, step, total=len(plan.steps))
-            if outcome is StepOutcome.ESCALATED:
+            if outcome in (StepOutcome.ESCALATED, StepOutcome.PARKED):
                 return self.store.get_run(self.run_id)
             if outcome is StepOutcome.REPLAN:
                 self.replans_used += 1
@@ -262,16 +276,22 @@ class _Executor:
         self.store.set_step_state(self.run_id, position, StepState.RUNNING)
         messages = self._messages(position, step, total)
         tools = [*self.registry.specs_for(step.allowed_tools), ESCALATE_SPEC]
+        approved = self._approved_calls(position)
         failed_attempts = 0
         transient_attempts = 0
         while True:
-            self.budget.check()
-            turn = self.client.complete(messages, tools=tools, model_role="loop")
-            self.budget.record_turn(turn)
-            self.budget.check_cost()
-            if not turn.tool_calls:
-                break
-            call = turn.tool_calls[0]
+            if approved:
+                self.budget.check()
+                call = approved.pop(0)
+                turn = AssistantTurn(model="engine", tool_calls=[call])
+            else:
+                self.budget.check()
+                turn = self.client.complete(messages, tools=tools, model_role="loop")
+                self.budget.record_turn(turn)
+                self.budget.check_cost()
+                if not turn.tool_calls:
+                    break
+                call = turn.tool_calls[0]
             if call.name == ESCALATE_TOOL:
                 self._model_escalation(position, call)
                 return StepOutcome.ESCALATED
@@ -279,6 +299,8 @@ class _Executor:
             attempt = 1
             self.budget.record_step()
             self._record(position, call.name, observation, attempt)
+            if _approval_required(observation):
+                return self._park(position, step, call, observation)
             while not observation.ok:
                 decision = self._decision(
                     observation,
@@ -420,6 +442,52 @@ class _Executor:
             {"phase": "replanning", "step_position": position, "failure": failure_context},
         )
 
+    def _approved_calls(self, position: int) -> list[ToolCall]:
+        """Prepared actions a human approved and the engine has not submitted."""
+        return [
+            ToolCall(id=f"approval-{request.id}", name=request.tool, arguments=request.arguments)
+            for request in self.store.unsubmitted_approvals(self.run_id, position)
+        ]
+
+    def _park(
+        self, position: int, step: Step, call: ToolCall, observation: Observation
+    ) -> StepOutcome:
+        """Prepare an irreversible gated action and wait for a human decision."""
+        tool = self.registry.get(call.name)
+        if tool is None or not tool.irreversible:
+            # A gate on a reversible action cannot be prepared safely.
+            self._escalate(
+                FailureDecision(
+                    FailureAction.ESCALATE,
+                    reason=f"the policy gate requires approval for a reversible action: "
+                    f"{observation.summary}",
+                    question=(
+                        f"{observation.summary} The action cannot be prepared for approval. "
+                        f"How should the Run proceed?"
+                    ),
+                    context=observation.data,
+                ),
+                tool=call.name,
+                arguments=call.arguments,
+                step_position=position,
+            )
+            return StepOutcome.ESCALATED
+        data = observation.data
+        prepare_approval(
+            self.store,
+            self.run_id,
+            key=action_key(step.id, call.name, call.arguments),
+            step_position=position,
+            step_id=step.id,
+            tool=call.name,
+            action=str(data.get("action") or tool.action or call.name),
+            arguments=call.arguments,
+            policy=data.get("policy"),
+            rule=data.get("rule"),
+            reason=str(data.get("reason") or observation.summary),
+        )
+        return StepOutcome.PARKED
+
     def _call(self, step: Step, call: ToolCall) -> Observation:
         if call.name not in step.allowed_tools:
             return Observation(
@@ -438,8 +506,15 @@ class _Executor:
         entry = self.store.get_journal_entry(self.run_id, key)
         if entry is not None and entry.status == "done" and entry.result is not None:
             return Observation.model_validate(entry.result)
+        approved = self.store.approved_approval_for(self.run_id, key)
         self.store.record_action(self.run_id, key, call.name, call.arguments)
-        observation = self.registry.invoke(call.name, call.arguments)
+        if approved is not None:
+            # A human approved this exact action; submit it without re-gating.
+            observation = tool.invoke(call.arguments)
+            if observation.ok:
+                self.store.mark_approval_executed(approved.id)
+        else:
+            observation = self.registry.invoke(call.name, call.arguments)
         if observation.ok:
             self.store.complete_action(self.run_id, key, observation.model_dump())
         else:

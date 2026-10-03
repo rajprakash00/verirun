@@ -12,6 +12,7 @@ from company_operator.context.models import WorkOrder
 from company_operator.engine.models import CheckResult, Observation, Plan, Step
 from company_operator.engine.states import RunState, StepState, transition
 from company_operator.runs.models import (
+    ApprovalRequest,
     Checkpoint,
     Escalation,
     JournalEntry,
@@ -70,6 +71,26 @@ CREATE TABLE IF NOT EXISTS escalations (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS approvals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    step_position INTEGER NOT NULL,
+    step_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    action TEXT NOT NULL,
+    arguments_json TEXT NOT NULL DEFAULT '{}',
+    policy TEXT,
+    rule TEXT,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    decision_reason TEXT,
+    decided_at TEXT,
+    executed_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (run_id, key)
+);
+
 CREATE TABLE IF NOT EXISTS journal (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL,
@@ -107,6 +128,14 @@ CREATE TABLE IF NOT EXISTS verifications (
 
 
 class RunNotFoundError(KeyError):
+    pass
+
+
+class ApprovalNotFoundError(KeyError):
+    pass
+
+
+class ApprovalDecisionError(ValueError):
     pass
 
 
@@ -266,6 +295,153 @@ class RunStore:
                 "SELECT * FROM escalations WHERE run_id = ? ORDER BY id", (run_id,)
             ).fetchall()
         return [_row_to_escalation(row) for row in rows]
+
+    def create_approval(
+        self,
+        run_id: str,
+        *,
+        key: str,
+        step_position: int,
+        step_id: str,
+        tool: str,
+        action: str,
+        arguments: dict[str, Any] | None = None,
+        policy: str | None = None,
+        rule: str | None = None,
+        reason: str = "",
+    ) -> ApprovalRequest:
+        """Prepare one irreversible action for a human decision.
+
+        Creating the same prepared action twice returns the existing request, so
+        a resumed Run never raises a duplicate gate.
+        """
+        self._require(run_id)
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE run_id = ? AND key = ?", (run_id, key)
+            ).fetchone()
+        if row is not None:
+            return _row_to_approval(row)
+        moment = _iso(_now())
+        with closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO approvals
+                    (run_id, key, step_position, step_id, tool, action, arguments_json,
+                     policy, rule, reason, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    run_id,
+                    key,
+                    step_position,
+                    step_id,
+                    tool,
+                    action,
+                    json.dumps(arguments or {}),
+                    policy,
+                    rule,
+                    reason,
+                    moment,
+                ),
+            )
+        return self.get_approval(int(cursor.lastrowid))
+
+    def get_approval(self, approval_id: int) -> ApprovalRequest:
+        with closing(self._connect()) as conn:
+            row = conn.execute("SELECT * FROM approvals WHERE id = ?", (approval_id,)).fetchone()
+        if row is None:
+            raise ApprovalNotFoundError(f"no Approval Request with id {approval_id}")
+        return _row_to_approval(row)
+
+    def list_approvals(self, run_id: str) -> list[ApprovalRequest]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM approvals WHERE run_id = ? ORDER BY id", (run_id,)
+            ).fetchall()
+        return [_row_to_approval(row) for row in rows]
+
+    def list_pending_approvals(self) -> list[ApprovalRequest]:
+        """Every prepared action across all Runs, oldest first: the queue."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM approvals WHERE status = 'pending' ORDER BY id"
+            ).fetchall()
+        return [_row_to_approval(row) for row in rows]
+
+    def unsubmitted_approvals(self, run_id: str, step_position: int) -> list[ApprovalRequest]:
+        """Approved prepared actions for one Step that the engine has not submitted."""
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE run_id = ? AND step_position = ? AND status = 'approved'
+                      AND executed_at IS NULL
+                ORDER BY id
+                """,
+                (run_id, step_position),
+            ).fetchall()
+        return [_row_to_approval(row) for row in rows]
+
+    def open_approval(self, run_id: str) -> ApprovalRequest | None:
+        """The oldest pending Approval Request for a Run, if one exists."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM approvals WHERE run_id = ? AND status = 'pending'
+                ORDER BY id LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+        return _row_to_approval(row) if row is not None else None
+
+    def approved_approval_for(self, run_id: str, key: str) -> ApprovalRequest | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE run_id = ? AND key = ? AND status = 'approved'
+                ORDER BY id LIMIT 1
+                """,
+                (run_id, key),
+            ).fetchone()
+        return _row_to_approval(row) if row is not None else None
+
+    def decide_approval(
+        self, approval_id: int, *, approved: bool, reason: str | None = None
+    ) -> ApprovalRequest:
+        """Record a human decision. A decided request cannot be decided again."""
+        request = self.get_approval(approval_id)
+        if request.status != "pending":
+            raise ApprovalDecisionError(
+                f"Approval Request {approval_id} was already {request.status}"
+            )
+        status = "approved" if approved else "rejected"
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                """
+                UPDATE approvals SET status = ?, decision_reason = ?, decided_at = ?
+                WHERE id = ?
+                """,
+                (status, reason, _iso(_now()), approval_id),
+            )
+        return self.get_approval(approval_id)
+
+    def mark_approval_executed(self, approval_id: int) -> ApprovalRequest:
+        """Record that the approved action was submitted, exactly once."""
+        request = self.get_approval(approval_id)
+        if request.status != "approved":
+            raise ApprovalDecisionError(
+                f"Approval Request {approval_id} is {request.status}, not approved"
+            )
+        if request.executed_at is not None:
+            raise ApprovalDecisionError(f"Approval Request {approval_id} was already executed")
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                "UPDATE approvals SET executed_at = ? WHERE id = ?",
+                (_iso(_now()), approval_id),
+            )
+        return self.get_approval(approval_id)
 
     def transition(self, run_id: str, target: RunState) -> Run:
         run = self.get_run(run_id)
@@ -602,6 +778,27 @@ def _row_to_escalation(row: sqlite3.Row) -> Escalation:
         question=row["question"],
         context=json.loads(row["context_json"]),
         resolved=bool(row["resolved"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
+def _row_to_approval(row: sqlite3.Row) -> ApprovalRequest:
+    return ApprovalRequest(
+        id=row["id"],
+        run_id=row["run_id"],
+        key=row["key"],
+        step_position=row["step_position"],
+        step_id=row["step_id"],
+        tool=row["tool"],
+        action=row["action"],
+        arguments=json.loads(row["arguments_json"]),
+        policy=row["policy"],
+        rule=row["rule"],
+        reason=row["reason"],
+        status=row["status"],
+        decision_reason=row["decision_reason"],
+        decided_at=datetime.fromisoformat(row["decided_at"]) if row["decided_at"] else None,
+        executed_at=datetime.fromisoformat(row["executed_at"]) if row["executed_at"] else None,
         created_at=datetime.fromisoformat(row["created_at"]),
     )
 

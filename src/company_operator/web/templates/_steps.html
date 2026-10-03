@@ -1,0 +1,11 @@
+{% if steps %}
+<ol class="steps">
+  {% for item in steps %}
+  <li>
+    <code>{{ item.step.id }}</code> {{ item.step.goal }}
+    <span class="state state-{{ item.state.value }}">{{ item.state.value }}</span>
+    <div class="muted">tools: {{ item.step.allowed_tools | join(", ") }} · done: {{ item.step.done_criterion }}</div>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}

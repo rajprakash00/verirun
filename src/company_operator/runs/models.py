@@ -94,3 +94,29 @@ class Escalation(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
     resolved: bool = False
     created_at: datetime
+
+
+ApprovalStatus = Literal["pending", "approved", "rejected"]
+
+
+class ApprovalRequest(BaseModel):
+    """One prepared irreversible action waiting for a human yes/no."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    run_id: str
+    key: str
+    step_position: int
+    step_id: str
+    tool: str
+    action: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    policy: str | None = None
+    rule: str | None = None
+    reason: str
+    status: ApprovalStatus = "pending"
+    decision_reason: str | None = None
+    decided_at: datetime | None = None
+    executed_at: datetime | None = None
+    created_at: datetime

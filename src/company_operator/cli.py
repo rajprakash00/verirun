@@ -7,25 +7,18 @@ from pathlib import Path
 
 from company_operator.config import Settings
 from company_operator.context.company import (
-    CompanyContext,
     CompanyContextError,
     load_company_context,
 )
 from company_operator.context.models import WorkOrder
-from company_operator.context.task_pack import TaskPack, TaskPackError, load_task_pack
+from company_operator.context.task_pack import TaskPackError, load_task_pack
 from company_operator.engine.models import CheckResult
 from company_operator.engine.orchestrator import report_run, run_task
 from company_operator.engine.states import RunState
 from company_operator.llm.client import LLMClient, build_client
 from company_operator.runs.models import Escalation, Run
 from company_operator.runs.store import RunStore, generate_run_id
-from company_operator.tools import (
-    PolicyGate,
-    ToolRegistry,
-    build_erp_tools,
-    build_file_tools,
-    build_mail_tools,
-)
+from company_operator.runtime import build_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,7 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("request", help="the short request, for example: process the invoices")
     run.add_argument("--task", default=None, help="Task Pack id, for example: invoice-processing")
 
-    subparsers.add_parser("serve", help="serve the local dashboard")
+    serve = subparsers.add_parser("serve", help="serve the local dashboard")
+    serve.add_argument("--host", default="127.0.0.1", help="interface to bind (default 127.0.0.1)")
+    serve.add_argument("--port", type=int, default=8000, help="port to bind (default 8000)")
 
     report = subparsers.add_parser("report", help="render the Evidence Pack for a Run")
     report.add_argument("run_id", help="Run id")
@@ -57,23 +52,25 @@ def main(
     if args.command == "run":
         return _run_command(args, settings, client)
     if args.command == "serve":
-        print("serve is not implemented yet", file=sys.stderr)
-        return 1
+        return _serve_command(args, settings)
     if args.command == "report":
         return _report_command(args, settings)
     return 0
 
 
-def build_registry(
-    settings: Settings, context: CompanyContext, task_pack: TaskPack
-) -> ToolRegistry:
-    """Every tool the Task Pack allows, governed by the policy gate."""
-    tools = [
-        *build_file_tools(settings.shared_dir),
-        *build_mail_tools(settings.mail_db, settings.shared_dir),
-        *build_erp_tools(settings.erp_db),
-    ]
-    return ToolRegistry.from_task_pack(tools, task_pack, gate=PolicyGate(context.policies))
+def _serve_command(args: argparse.Namespace, settings: Settings | None) -> int:
+    import uvicorn
+
+    from company_operator.web import create_app
+
+    settings = settings or Settings()
+    uvicorn.run(
+        create_app(settings),
+        host=args.host,
+        port=args.port,
+        log_level="info",
+    )
+    return 0
 
 
 def _run_command(

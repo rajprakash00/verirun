@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Runs — Operator{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+<p class="subtitle">Every Run the Operator has started.</p>
+{% if runs %}
+<table>
+  <thead>
+    <tr><th>Run</th><th>State</th><th>Task</th><th>Request</th><th>Updated</th></tr>
+  </thead>
+  <tbody>
+    {% for run in runs %}
+    <tr>
+      <td><a href="/runs/{{ run.id }}"><code>{{ run.id }}</code></a></td>
+      <td><span class="state state-{{ run.state.value }}">{{ run.state.value }}</span></td>
+      <td><code>{{ run.task_id }}</code></td>
+      <td>
+        {{ run.request }}
+        {% if run.question %}<div class="muted">Open question: {{ run.question }}</div>{% endif %}
+      </td>
+      <td class="muted">{{ run.updated_at.strftime("%Y-%m-%d %H:%M") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No Runs yet. Start one with <code>operator run "..." --task invoice-processing</code>.</p>
+{% endif %}
+{% endblock %}

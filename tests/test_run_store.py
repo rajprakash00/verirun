@@ -7,6 +7,7 @@ import pytest
 from company_operator.context.models import ApprovalGate, WorkOrder
 from company_operator.engine.models import CheckResult, Observation, Plan, Step
 from company_operator.engine.states import RunState, StepState
+from company_operator.runs.models import ApprovalRequest
 from company_operator.runs.store import RunNotFoundError, RunStore
 
 
@@ -383,6 +384,134 @@ def test_failed_action_can_be_retried(store: RunStore) -> None:
     assert not store.completed_action("RUN-0001", "key")
     assert store.record_action("RUN-0001", "key", "erp.file_invoice", {})
     assert store.completed_action("RUN-0001", "key") is False
+
+
+def seed_executing_run(store: RunStore, run_id: str = "RUN-0001") -> None:
+    store.create_run("Process the invoices", "invoice-processing", run_id=run_id)
+    store.transition(run_id, RunState.RESOLVING)
+    store.save_plan(run_id, plan())
+    store.transition(run_id, RunState.PLANNED)
+    store.transition(run_id, RunState.EXECUTING)
+
+
+def approval(store: RunStore, **overrides) -> ApprovalRequest:
+    fields = {
+        "key": "step-2:erp.schedule_payment:abcd1234",
+        "step_position": 1,
+        "step_id": "step-2",
+        "tool": "erp.schedule_payment",
+        "action": "payment.schedule",
+        "arguments": {"invoice_id": "INV-3005"},
+        "policy": "spend-limits",
+        "rule": "approval-threshold",
+        "reason": "Any payment above 10,000.00 USD must be held at an approval gate.",
+    }
+    fields.update(overrides)
+    return store.create_approval("RUN-0001", **fields)
+
+
+def test_an_approval_request_parks_the_run_and_round_trips(store: RunStore) -> None:
+    seed_executing_run(store)
+
+    request = approval(store)
+    store.transition("RUN-0001", RunState.AWAITING_APPROVAL)
+
+    assert request.id > 0
+    assert request.run_id == "RUN-0001"
+    assert request.tool == "erp.schedule_payment"
+    assert request.arguments == {"invoice_id": "INV-3005"}
+    assert request.status == "pending"
+    assert request.decided_at is None
+    assert request.executed_at is None
+    assert request.created_at.tzinfo is not None
+    assert store.get_run("RUN-0001").state is RunState.AWAITING_APPROVAL
+    assert store.get_approval(request.id) == request
+    assert store.open_approval("RUN-0001") == request
+    assert store.list_pending_approvals() == [request]
+
+
+def test_creating_the_same_prepared_action_twice_returns_one_request(store: RunStore) -> None:
+    seed_executing_run(store)
+
+    first = approval(store)
+    second = approval(store)
+
+    assert first.id == second.id
+    assert len(store.list_approvals("RUN-0001")) == 1
+
+
+def test_approving_records_the_decision_time_and_releases_the_queue(store: RunStore) -> None:
+    seed_executing_run(store)
+    request = approval(store)
+    store.transition("RUN-0001", RunState.AWAITING_APPROVAL)
+
+    decided = store.decide_approval(request.id, approved=True)
+
+    assert decided.status == "approved"
+    assert decided.decided_at is not None
+    assert decided.decision_reason is None
+    assert store.open_approval("RUN-0001") is None
+    assert store.list_pending_approvals() == []
+    assert store.unsubmitted_approvals("RUN-0001", 1) == [decided]
+    assert store.approved_approval_for("RUN-0001", request.key) == decided
+    with pytest.raises(ValueError):
+        store.decide_approval(request.id, approved=False, reason="too late")
+
+
+def test_rejecting_records_the_reason(store: RunStore) -> None:
+    seed_executing_run(store)
+    request = approval(store)
+    store.transition("RUN-0001", RunState.AWAITING_APPROVAL)
+
+    decided = store.decide_approval(request.id, approved=False, reason="Budget is frozen")
+
+    assert decided.status == "rejected"
+    assert decided.decision_reason == "Budget is frozen"
+    assert store.open_approval("RUN-0001") is None
+    assert store.unsubmitted_approvals("RUN-0001", 1) == []
+    assert store.approved_approval_for("RUN-0001", request.key) is None
+
+
+def test_an_approved_action_can_be_marked_submitted_once(store: RunStore) -> None:
+    seed_executing_run(store)
+    request = approval(store)
+    store.transition("RUN-0001", RunState.AWAITING_APPROVAL)
+    store.decide_approval(request.id, approved=True)
+
+    store.mark_approval_executed(request.id)
+
+    submitted = store.get_approval(request.id)
+    assert submitted.executed_at is not None
+    with pytest.raises(ValueError):
+        store.mark_approval_executed(request.id)
+
+
+def test_unsubmitted_approved_actions_are_listed_for_their_step(store: RunStore) -> None:
+    seed_executing_run(store)
+    first = approval(store)
+    approval(
+        store,
+        key="step-2:erp.file_invoice:9999",
+        tool="erp.file_invoice",
+        action="invoice.file",
+        arguments={"number": "NW-2026-001"},
+    )
+    store.transition("RUN-0001", RunState.AWAITING_APPROVAL)
+    decided = store.decide_approval(first.id, approved=True)
+
+    assert store.unsubmitted_approvals("RUN-0001", 1) == [decided]
+
+    store.mark_approval_executed(first.id)
+
+    assert store.unsubmitted_approvals("RUN-0001", 1) == []
+    assert store.unsubmitted_approvals("RUN-0001", 0) == []
+
+
+def test_unknown_approvals_raise(store: RunStore) -> None:
+    with pytest.raises(KeyError):
+        store.get_approval(999)
+    with pytest.raises(KeyError):
+        store.decide_approval(999, approved=True)
 
 
 def test_checkpoints_round_trip_and_latest_wins(store: RunStore) -> None:

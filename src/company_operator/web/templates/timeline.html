@@ -1,0 +1,43 @@
+{% include "_steps.html" %}
+{% if observations %}
+<ul class="timeline">
+  {% for item in observations %}
+  <li class="{{ 'ok' if item.ok else 'bad' }}">
+    <span class="muted">{{ item.created_at.strftime("%H:%M:%S") }}</span>
+    <code>{{ item.tool or "(model)" }}</code>
+    {% if item.attempt > 1 %}<span class="muted">attempt {{ item.attempt }}</span>{% endif %}
+    <span class="badge {{ 'ok' if item.ok else 'bad' }}">{{ 'ok' if item.ok else (item.error_kind or 'failed') }}</span>
+    {{ item.summary }}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No observations yet.</p>
+{% endif %}
+{% if approvals %}
+<h2>Approval gates</h2>
+<ul class="timeline">
+  {% for request in approvals %}
+  <li class="{{ 'ok' if request.status == 'approved' else 'bad' if request.status == 'rejected' else '' }}">
+    <span class="muted">{{ request.created_at.strftime("%H:%M:%S") }}</span>
+    <code>{{ request.tool }}</code>
+    <span class="badge {{ 'ok' if request.status == 'approved' else 'bad' if request.status == 'rejected' else '' }}">{{ request.status }}</span>
+    {{ request.reason }}
+    {% if request.decision_reason %}<div class="muted">Decision: {{ request.decision_reason }}</div>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if escalations %}
+<h2>Escalations</h2>
+<ul class="timeline">
+  {% for escalation in escalations %}
+  <li class="bad">
+    <span class="muted">{{ escalation.created_at.strftime("%H:%M:%S") }}</span>
+    <strong>{{ escalation.reason }}</strong>
+    <div>{{ escalation.question }}</div>
+    <div class="muted">{{ "resolved" if escalation.resolved else "waiting for a human" }}</div>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}

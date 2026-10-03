@@ -269,3 +269,11 @@ def test_mutating_erp_tools_are_journaled_side_effects(ledgerlite_db: Path) -> N
     assert tools["erp.schedule_payment"].side_effect
     assert tools["erp.schedule_payment"].action == "payment.schedule"
     assert not tools["erp.get_invoice"].side_effect
+
+
+def test_scheduling_a_payment_is_marked_irreversible(ledgerlite_db: Path) -> None:
+    tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
+
+    assert tools["erp.schedule_payment"].irreversible
+    assert not tools["erp.file_invoice"].irreversible
+    assert not tools["erp.get_invoice"].irreversible

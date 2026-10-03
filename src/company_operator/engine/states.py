@@ -38,6 +38,7 @@ TRANSITIONS: dict[RunState, frozenset[RunState]] = {
     ),
     RunState.EXECUTING: frozenset(
         {
+            RunState.AWAITING_APPROVAL,
             RunState.VERIFYING,
             RunState.NEEDS_HUMAN,
             RunState.FAILED,
