@@ -7,7 +7,8 @@ the procurement mailbox.
 
 - Read the procurement mailbox (`procurement@company.example`) and open the
   vendor onboarding email.
-- Save the tax form attachment to the working folder.
+- Save the tax form attachment to the Run's working folder in the shared file
+  tree (`working/<run-id>/`).
 
 ## 2. Check for duplicates
 

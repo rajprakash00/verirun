@@ -135,8 +135,8 @@ skip automatically when Chromium is unavailable.
 - **LedgerLite** (`mocks/ledgerlite/`) — a FastAPI ERP with vendors, purchase
   orders, goods receipts, invoices, payments, and approvals, backed by SQLite.
   It is the ground truth the Verifier reads.
-- **shared/** — the document tree: `documents/` (sources), `archive/` (tax
-  forms), `processed/` (filed invoice sources).
+- **shared/** — the document tree: `documents/` (sources), `working/` (per-Run
+  staging), `archive/` (tax forms), `processed/` (filed invoice sources).
 - **SQLite** (`mocks/state/`) — all state; seeded scenarios are fixed, never
   random.
 
@@ -204,6 +204,7 @@ is called at runtime; MailDesk and LedgerLite run locally.
 | `OPERATOR_FIXTURE_DIR` | `tests/fixtures/llm` | Recorded responses keyed by request hash. |
 | `OPERATOR_MAX_STEPS` | `60` | Per-run step meter. |
 | `OPERATOR_MAX_COST_USD` | `5.0` | Per-run cost meter. |
+| `OPERATOR_REQUEST_TIMEOUT_S` | `600` | Per-request model timeout; transient timeouts are retried. |
 
 Prompt caching is enabled by sending a stable per-run session id header. Model
 prices live in `src/company_operator/config.py` and drive the cost meter.

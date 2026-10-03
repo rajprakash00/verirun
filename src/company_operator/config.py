@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     erp_db: Path = Path("mocks/state/ledgerlite.db")
     max_steps: int = DEFAULT_MAX_STEPS
     max_cost_usd: float = DEFAULT_MAX_COST_USD
-    request_timeout_s: float = 120.0
+    request_timeout_s: float = 600.0
     prices: dict[str, ModelPrice] = Field(default_factory=lambda: dict(DEFAULT_PRICES))
 
     def model_for(self, role: ModelRole) -> str:

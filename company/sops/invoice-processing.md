@@ -6,7 +6,8 @@ validated invoices in LedgerLite and scheduled payments.
 ## 1. Collect the invoices
 
 - Read the AP mailbox (`ap@company.example`) and open every unread invoice email.
-- Save each invoice attachment to the working folder before touching the ERP.
+- Save each invoice attachment to the Run's working folder in the shared file
+  tree (`working/<run-id>/`) before touching the ERP.
 - Treat the invoice PDF as the source of truth for invoice number, vendor,
   amount, purchase order, and goods receipt references.
 
@@ -48,4 +49,5 @@ validated invoices in LedgerLite and scheduled payments.
 - Verify against LedgerLite and the filesystem: the invoice record exists with
   the right amount and status, and the source document is archived.
 - A run is complete only when every success criterion passes. Otherwise report
-  the exception and escalate to the AP owner.
+  the exception and escalate to the AP owner; the Operator dashboard delivers
+  the question to them and resumes the Run with their answer.

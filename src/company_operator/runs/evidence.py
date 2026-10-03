@@ -93,6 +93,7 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
                 "tool": record.tool,
                 "ok": record.ok,
                 "summary": record.summary,
+                "data": record.data,
                 "error_kind": record.error_kind,
                 "artifacts": record.artifacts,
                 "attempt": record.attempt,

@@ -37,6 +37,8 @@ def test_build_evidence_carries_the_whole_run(tmp_path: Path) -> None:
         "runs/RUN-0001/shot.png",
         "processed/NW-2026-001.pdf",
     }
+    archive = next(item for item in evidence["observations"] if item["tool"] == "files.archive")
+    assert archive["data"] == {"path": "processed/NW-2026-001.pdf"}
 
 
 def test_write_evidence_lands_in_the_run_directory(tmp_path: Path) -> None:

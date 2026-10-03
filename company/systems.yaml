@@ -30,5 +30,6 @@ systems:
     kind: filesystem
     root: shared
     description: >-
-      Shared documents and archive folders: documents/, archive/, and
-      processed/.
+      Shared documents and folders: documents/ (source documents), working/
+      (per-Run staging, for example working/<run-id>/), processed/ (filed
+      sources), and archive/ (tax forms and other retained papers).
