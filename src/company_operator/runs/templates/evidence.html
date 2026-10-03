@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence Pack {{ evidence.run_id }} — Operator</title>
+<style>
+  :root {
+    --ink: #1c2333; --muted: #5b6577; --line: #dde3ec; --bg: #f5f7fb;
+    --accent: #2f5dd1; --ok: #1c7c4a; --warn: #a86400; --bad: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { background: #fff; border-bottom: 1px solid var(--line); padding: 20px 24px; }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); }
+  main { max-width: 1080px; margin: 24px auto; padding: 0 24px 64px; }
+  h2 {
+    font-size: 15px; margin: 0 0 10px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted);
+  }
+  h3 { font-size: 14px; margin: 18px 0 6px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
+  .state { display: inline-block; border-radius: 999px; padding: 3px 12px; font-weight: 700; background: #e8ecf5; }
+  .state-completed { background: #e2f4e8; color: var(--ok); }
+  .state-awaiting_approval { background: #fff1d6; color: var(--warn); }
+  .state-needs_human, .state-failed, .state-limit_reached { background: #fde7e5; color: var(--bad); }
+  .metrics { display: flex; gap: 32px; margin: 12px 0 0; flex-wrap: wrap; }
+  .metrics div { min-width: 120px; }
+  .metrics dt { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .metrics dd { margin: 2px 0 0; font-size: 18px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  code { background: #eef1f7; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+  pre { background: #eef1f7; border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 13px; }
+  ul { margin: 6px 0; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .error { color: var(--bad); font-weight: 600; }
+  .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .badge.ok { color: var(--ok); }
+  .badge.bad { color: var(--bad); }
+  .badge.warn { color: var(--warn); }
+  .timeline { list-style: none; margin: 0; padding: 0; }
+  .timeline li { border-left: 3px solid var(--line); margin-left: 6px; padding: 5px 0 10px 14px; }
+  .timeline li.ok { border-color: #9fd3b4; }
+  .timeline li.bad { border-color: #eab6b2; }
+  .timeline .when { color: var(--muted); font-size: 12px; }
+  .gallery { display: flex; flex-wrap: wrap; gap: 16px; }
+  .gallery figure { margin: 0; max-width: 420px; }
+  .gallery img { width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; }
+  .gallery figcaption { color: var(--muted); font-size: 12px; padding-top: 4px; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 24px 40px; }
+</style>
+</head>
+<body data-run-id="{{ evidence.run_id }}" data-result="{{ evidence.result }}"
+      data-verified="{{ 'true' if evidence.verified else 'false' }}">
+<header>
+  <h1>Evidence Pack <span class="state state-{{ evidence.state }}">{{ evidence.result }}</span></h1>
+  <p>{{ evidence.run_id }} · task <code>{{ evidence.task_id }}</code> · generated {{ evidence.generated_at }}</p>
+</header>
+<main>
+
+  <div class="card">
+    <h2>Run</h2>
+    <p>{{ evidence.request }}</p>
+    <div class="metrics">
+      <div><dt>Cost</dt><dd id="metric-cost">${{ '%.2f'|format(evidence.cost_usd or 0) }}</dd></div>
+      <div><dt>Steps used</dt><dd id="metric-steps">{{ evidence.steps_used }}</dd></div>
+      <div><dt>Created</dt><dd class="muted">{{ evidence.created_at }}</dd></div>
+      <div><dt>Updated</dt><dd class="muted">{{ evidence.updated_at }}</dd></div>
+    </div>
+    {% if evidence.error %}<p class="error">{{ evidence.error }}</p>{% endif %}
+  </div>
+
+  {% if evidence.work_order %}
+  <div class="card">
+    <h2>Work Order</h2>
+    <p><strong>{{ evidence.work_order.goal }}</strong></p>
+    <p class="muted">SOP <code>{{ evidence.work_order.sop }}</code>
+      · systems {{ evidence.work_order.systems | join(", ") }}
+      · policies {{ evidence.work_order.policies | join(", ") }}</p>
+    {% if evidence.work_order.assumptions %}
+    <h3>Assumptions</h3>
+    <ul>{% for item in evidence.work_order.assumptions %}<li>{{ item }}</li>{% endfor %}</ul>
+    {% endif %}
+    <h3>Approval gates</h3>
+    {% if evidence.work_order.approval_gates %}
+    <ul>
+      {% for gate in evidence.work_order.approval_gates %}
+      <li><code>{{ gate.id }}</code> — {{ gate.description }}{% if gate.policy %} <span class="muted">[{{ gate.policy }}]</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">None.</p>{% endif %}
+    <h3>Success criteria</h3>
+    <ul>{% for item in evidence.work_order.success_criteria %}<li>{{ item }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if evidence.plan %}
+  <div class="card">
+    <h2>Plan</h2>
+    <ol class="steps">
+      {% for step in evidence.plan.steps %}
+      <li>
+        <strong>{{ step.goal }}</strong> <span class="muted">({{ step.id }})</span>
+        <div class="muted">tools: {{ step.allowed_tools | join(", ") or "(none)" }}</div>
+        <div class="muted">done when: {{ step.done_criterion }}</div>
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Timeline</h2>
+    {% if timeline %}
+    <ul class="timeline">
+      {% for item in timeline %}
+      <li class="{{ 'ok' if item.ok else 'bad' }}">
+        <span class="badge {{ 'ok' if item.ok else 'bad' }}">{{ 'ok' if item.ok else 'failed' }}</span>
+        <strong>{{ item.title }}</strong>
+        {% if item.attempt and item.attempt > 1 %}<span class="muted">attempt {{ item.attempt }}</span>{% endif %}
+        <div>{{ item.detail }}</div>
+        <div class="when">{{ item.at }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">No tool calls were recorded.</p>{% endif %}
+  </div>
+
+  {% if screenshots %}
+  <div class="card">
+    <h2>Screenshots</h2>
+    <div class="gallery">
+      {% for shot in screenshots %}
+      <figure>
+        <img src="{{ shot.data_uri }}" alt="{{ shot.name }}">
+        <figcaption>{{ shot.name }}</figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if evidence.approvals %}
+  <div class="card">
+    <h2>Approvals</h2>
+    <table>
+      <thead><tr><th>Action</th><th>Status</th><th>Policy</th><th>Reason</th><th>Arguments</th><th>Decided</th></tr></thead>
+      <tbody>
+        {% for approval in evidence.approvals %}
+        <tr>
+          <td><code>{{ approval.tool }}</code><br>{{ approval.action }}<br><span class="muted">step {{ approval.step_id }}</span></td>
+          <td><span class="badge {{ 'ok' if approval.status == 'approved' else ('bad' if approval.status == 'rejected' else 'warn') }}">{{ approval.status }}</span>
+            {% if approval.decision_reason %}<div class="muted">{{ approval.decision_reason }}</div>{% endif %}</td>
+          <td>{{ approval.policy or "—" }}{% if approval.rule %}<br><span class="muted">{{ approval.rule }}</span>{% endif %}</td>
+          <td>{{ approval.reason }}</td>
+          <td><code>{{ approval.arguments | tojson }}</code></td>
+          <td class="muted">{{ approval.decided_at or "pending" }}{% if approval.executed_at %}<br>executed {{ approval.executed_at }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Verification</h2>
+    {% if evidence.verification %}
+    <p><span class="badge {{ 'ok' if evidence.verification.passed else 'bad' }}">
+      {{ 'all checks passed' if evidence.verification.passed else 'verification failed' }}</span></p>
+    <ul>
+      {% for check in evidence.verification.checks %}
+      <li>
+        <span class="badge {{ 'ok' if check.ok else 'bad' }}">{{ 'pass' if check.ok else 'FAIL' }}</span>
+        <code>{{ check.id }}</code> — {{ check.description }}
+        <div class="muted">{{ check.detail }}</div>
+        {% if check.evidence %}<div class="muted">evidence: {{ check.evidence | join(", ") }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">The Run was not verified.</p>{% endif %}
+  </div>
+
+  {% if evidence.extractions %}
+  <div class="card">
+    <h2>Document extractions</h2>
+    {% for extraction in evidence.extractions %}
+    <h3>
+      <span class="badge {{ 'ok' if extraction.ok else 'bad' }}">{{ 'ok' if extraction.ok else 'failed' }}</span>
+      <code>{{ extraction.path }}</code>
+      <span class="muted">{{ extraction.method }} · pages {{ extraction.pages }} · lowest confidence {{ extraction.min_confidence }} · threshold {{ extraction.threshold }}</span>
+    </h3>
+    {% if extraction.fields %}
+    <table>
+      <thead><tr><th>Field</th><th>Value</th><th>Confidence</th></tr></thead>
+      <tbody>
+        {% for name, field in extraction.fields.items() %}
+        <tr><td><code>{{ name }}</code></td><td>{{ field.value }}</td><td>{{ field.confidence }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">{{ extraction.summary }}</p>{% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>Artifacts</h2>
+    {% if evidence.artifacts %}
+    <ul>{% for artifact in evidence.artifacts %}<li><code>{{ artifact }}</code></li>{% endfor %}</ul>
+    {% else %}<p class="muted">No artifacts were produced.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Open questions</h2>
+    {% if evidence.open_questions %}
+    <ul>{% for question in evidence.open_questions %}<li>{{ question }}</li>{% endfor %}</ul>
+    {% else %}<p class="muted">None.</p>{% endif %}
+  </div>
+
+</main>
+<footer>Operator · {{ evidence.run_id }} · evidence.json and evidence.html</footer>
+</body>
+</html>

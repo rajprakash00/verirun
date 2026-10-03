@@ -6,55 +6,13 @@ import json
 from pathlib import Path
 
 from company_operator.context.models import WorkOrder
-from company_operator.engine.models import CheckResult, Observation, Plan
+from company_operator.engine.models import Observation, Plan
 from company_operator.engine.states import RunState
 from company_operator.runs.evidence import build_evidence, write_evidence
 from company_operator.runs.store import RunStore
-from tests.support import WORK_ORDER, plan_json
+from tests.support import WORK_ORDER, plan_json, seed_completed_run
 
 PLAN = plan_json()
-
-
-def seed_completed_run(store: RunStore, run_id: str = "RUN-0001") -> None:
-    store.create_run("Process the invoices in the AP mailbox", "invoice-processing", run_id=run_id)
-    store.transition(run_id, RunState.RESOLVING)
-    store.save_work_order(run_id, WorkOrder.model_validate(WORK_ORDER))
-    store.save_plan(run_id, Plan.model_validate(json.loads(PLAN)))
-    store.transition(run_id, RunState.PLANNED)
-    store.transition(run_id, RunState.EXECUTING)
-    store.add_observation(
-        run_id,
-        Observation(
-            ok=True,
-            summary="Archived the source invoice",
-            data={"path": "processed/NW-2026-001.pdf"},
-        ),
-        step_position=2,
-        tool="files.archive",
-    )
-    store.add_observation(
-        run_id,
-        Observation(ok=True, summary="Screenshot saved", artifacts=["runs/RUN-0001/shot.png"]),
-        step_position=2,
-        tool="browser.screenshot",
-    )
-    store.record_action(run_id, "file-1", "erp.file_invoice", {"number": "NW-2026-001"})
-    store.complete_action(run_id, "file-1", {"invoice_id": "INV-3003"})
-    store.increment_usage(run_id, steps=3, cost_usd=0.42)
-    store.transition(run_id, RunState.VERIFYING)
-    store.save_verification(
-        run_id,
-        [
-            CheckResult(
-                id="invoice-filed",
-                description="The invoice exists in LedgerLite.",
-                ok=True,
-                detail="INV-3003 agrees with its source",
-                evidence=["erp:INV-3003", "source:documents/invoices/NW-2026-001.pdf"],
-            )
-        ],
-    )
-    store.transition(run_id, RunState.COMPLETED)
 
 
 def test_build_evidence_carries_the_whole_run(tmp_path: Path) -> None:

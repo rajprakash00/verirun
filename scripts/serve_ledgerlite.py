@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
         help=f"SQLite database to serve (default: {DEFAULT_DB})",
     )
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8101)
+    parser.add_argument("--port", type=int, default=8002)
     parser.add_argument(
         "--no-seed",
         action="store_true",

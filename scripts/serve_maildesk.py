@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
         help=f"shared file tree root (default: {DEFAULT_SHARED_ROOT})",
     )
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8102)
+    parser.add_argument("--port", type=int, default=8001)
     parser.add_argument(
         "--no-seed",
         action="store_true",
