@@ -14,9 +14,27 @@ from typing import Any
 import httpx
 import uvicorn
 
+from company_operator.config import Settings
+from company_operator.context.company import load_company_context
+from company_operator.context.task_pack import load_task_pack
+from company_operator.engine.orchestrator import run_task
 from company_operator.llm.client import AssistantTurn, ToolCall, Usage
+from company_operator.runs.store import RunStore
+from company_operator.runtime import build_registry
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def run_settings(tmp_path: Path, *, ledgerlite_db: Path, maildesk_state: Any) -> Settings:
+    return Settings(
+        _env_file=None,
+        company_dir=ROOT / "company",
+        tasks_dir=ROOT / "tasks",
+        run_db=tmp_path / "runs" / "operator.db",
+        shared_dir=maildesk_state.shared_root,
+        mail_db=maildesk_state.db_path,
+        erp_db=ledgerlite_db,
+    )
 
 
 def free_port() -> int:
@@ -90,6 +108,31 @@ PLAN = {
     ]
 }
 
+FILED_INVOICE_ID = "INV-3003"
+
+OVER_LIMIT_PLAN = {
+    "steps": [
+        {
+            "id": "step-1",
+            "goal": "File the Summit Industrial invoice",
+            "allowed_tools": ["erp.file_invoice"],
+            "done_criterion": "SI-2026-550 is filed against PO-2005 and GR-2505",
+        },
+        {
+            "id": "step-2",
+            "goal": "Prepare and schedule the payment",
+            "allowed_tools": ["erp.schedule_payment"],
+            "done_criterion": "The payment is scheduled once a human approves it",
+        },
+        {
+            "id": "step-3",
+            "goal": "Archive the source invoice",
+            "allowed_tools": ["files.archive"],
+            "done_criterion": "The source is in processed",
+        },
+    ]
+}
+
 
 class ScriptedClient:
     """A deterministic LLMClient for tests.
@@ -140,6 +183,65 @@ def tool_turn(
         model="scripted",
         tool_calls=[ToolCall(id=call_id, name=name, arguments=arguments or {})],
         usage=usage or Usage(),
+    )
+
+
+def park_over_limit_run(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state: Any
+) -> tuple[Settings, RunStore, ScriptedClient, str]:
+    """Run the seeded over-limit invoice until it parks at the payment gate."""
+    settings = run_settings(tmp_path, ledgerlite_db=ledgerlite_db, maildesk_state=maildesk_state)
+    context = load_company_context(settings.company_dir)
+    task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
+    store = RunStore(settings.run_db)
+    script = over_limit_script()
+    run = run_task(
+        "Process the invoices in the AP mailbox",
+        task_pack,
+        context,
+        script,
+        store,
+        build_registry(settings, context, task_pack),
+        erp_db_path=ledgerlite_db,
+        shared_root=maildesk_state.shared_root,
+        evidence_root=settings.run_db.parent,
+    )
+    return settings, store, script, run.id
+
+
+def over_limit_script() -> ScriptedClient:
+    """Drive the over-limit invoice to the payment gate, then through approval."""
+    return ScriptedClient(
+        [
+            json.dumps(WORK_ORDER),
+            json.dumps(OVER_LIMIT_PLAN),
+            tool_turn(
+                "erp.file_invoice",
+                {
+                    "number": "SI-2026-550",
+                    "vendor_id": "V-1005",
+                    "amount": 12500.00,
+                    "po_id": "PO-2005",
+                    "gr_id": "GR-2505",
+                },
+                call_id="c1",
+            ),
+            text_turn("Filed SI-2026-550."),
+            tool_turn(
+                "erp.schedule_payment", {"invoice_id": FILED_INVOICE_ID}, call_id="c2"
+            ),
+            # Consumed after the human approval resumes the Run.
+            text_turn("Payment scheduled."),
+            tool_turn(
+                "files.archive",
+                {
+                    "path": "documents/invoices/SI-2026-550.pdf",
+                    "directory": "processed",
+                },
+                call_id="c3",
+            ),
+            text_turn("Archived."),
+        ]
     )
 
 

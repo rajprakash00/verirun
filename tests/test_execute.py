@@ -15,6 +15,7 @@ import pytest
 
 from company_operator.config import ModelPrice
 from company_operator.context.company import load_company_context
+from company_operator.context.policies import Policy, PolicyRule, PolicySet
 from company_operator.context.task_pack import load_task_pack
 from company_operator.engine.execute import action_key, execute_run
 from company_operator.engine.models import Observation, Plan
@@ -22,7 +23,7 @@ from company_operator.engine.orchestrator import start_run
 from company_operator.engine.states import RunState
 from company_operator.llm.client import Usage
 from company_operator.runs.store import RunStore
-from company_operator.tools import Tool, ToolError, ToolRegistry, build_file_tools
+from company_operator.tools import PolicyGate, Tool, ToolError, ToolRegistry, build_file_tools
 from company_operator.tools.browser import ClickTool, SelectTool, SnapshotTool, TypeTool
 from tests.support import ROOT, WORK_ORDER, ScriptedClient, text_turn, tool_turn
 
@@ -779,6 +780,90 @@ def test_replans_are_bounded_across_resumes(tmp_path: Path) -> None:
     assert run.state is RunState.NEEDS_HUMAN
     assert tool.calls == 3
     assert len([c for c in store.list_escalations("RUN-0001")]) == 2
+
+
+class ReversibleGatedTool(Tool):
+    """A reversible side effect that policy nonetheless gates."""
+
+    name = "test.reversible"
+    description = "A reversible side effect."
+    parameters: ClassVar[dict[str, Any]] = NO_ARGUMENTS
+    side_effect = True
+    action = "test.reversible.run"
+
+    def run(self, args: dict[str, Any]) -> Observation:
+        return Observation(ok=True, summary="did the reversible thing")
+
+
+class IrreversibleGatedTool(Tool):
+    """An irreversible side effect that policy gates: prepare, don't run."""
+
+    name = "test.irreversible"
+    description = "An irreversible side effect."
+    parameters: ClassVar[dict[str, Any]] = NO_ARGUMENTS
+    side_effect = True
+    irreversible = True
+    action = "test.irreversible.run"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, args: dict[str, Any]) -> Observation:
+        self.calls += 1
+        return Observation(ok=True, summary="did the irreversible thing")
+
+
+def gated_registry(tool: Tool) -> ToolRegistry:
+    policies = PolicySet(
+        [
+            Policy(
+                id="test-policy",
+                title="Test policy",
+                rules=[
+                    PolicyRule(
+                        id="gate",
+                        description="This action always needs a human.",
+                        effect="require_approval",
+                        actions=[tool.action],
+                    )
+                ],
+            )
+        ]
+    )
+    return ToolRegistry([tool], allowlist=[tool.name], gate=PolicyGate(policies))
+
+
+def test_a_gated_irreversible_action_parks_without_running(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    seed_planned_run(store, one_step_plan("test.irreversible"))
+    tool = IrreversibleGatedTool()
+    client = ScriptedClient([tool_turn("test.irreversible")])
+
+    run = execute_run("RUN-0001", client, store, registry=gated_registry(tool))
+
+    assert run.state is RunState.AWAITING_APPROVAL
+    assert tool.calls == 0
+    request = store.open_approval("RUN-0001")
+    assert request is not None
+    assert request.tool == "test.irreversible"
+    assert request.reason == "This action always needs a human."
+
+
+def test_a_gated_reversible_action_escalates_instead_of_preparing_approval(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    seed_planned_run(store, one_step_plan("test.reversible"))
+    tool = ReversibleGatedTool()
+    client = ScriptedClient([tool_turn("test.reversible")])
+
+    run = execute_run("RUN-0001", client, store, registry=gated_registry(tool))
+
+    assert run.state is RunState.NEEDS_HUMAN
+    assert store.list_approvals("RUN-0001") == []
+    escalation = store.open_escalation("RUN-0001")
+    assert escalation is not None
+    assert "reversible" in escalation.reason
 
 
 def test_an_escalated_run_resumes_after_the_human_answers(tmp_path: Path) -> None:

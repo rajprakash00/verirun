@@ -20,6 +20,7 @@ ALLOWED = [
     (RunState.AWAITING_APPROVAL, RunState.EXECUTING),
     (RunState.AWAITING_APPROVAL, RunState.NEEDS_HUMAN),
     (RunState.AWAITING_APPROVAL, RunState.FAILED),
+    (RunState.EXECUTING, RunState.AWAITING_APPROVAL),
     (RunState.EXECUTING, RunState.VERIFYING),
     (RunState.EXECUTING, RunState.NEEDS_HUMAN),
     (RunState.EXECUTING, RunState.FAILED),

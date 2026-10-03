@@ -393,6 +393,7 @@ class SchedulePaymentTool(ErpTool):
         "Partial or split payments are rejected."
     )
     side_effect = True
+    irreversible = True
     action = "payment.schedule"
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",

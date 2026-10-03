@@ -120,6 +120,54 @@ def run_task(
     return store.get_run(run_id)
 
 
+def resume_run(
+    run_id: str,
+    task_pack: TaskPack,
+    client: LLMClient,
+    store: RunStore,
+    registry: ToolRegistry,
+    *,
+    erp_db_path: str | Path,
+    shared_root: str | Path,
+    evidence_root: str | Path,
+    max_steps: int = DEFAULT_MAX_STEPS,
+    max_cost_usd: float = DEFAULT_MAX_COST_USD,
+    prices: dict[str, ModelPrice] | None = None,
+) -> Run:
+    """Continue a parked or interrupted Run through Execute, Verify, and Report.
+
+    A Run still awaiting a human decision is left exactly where it is: no
+    timeout ever submits a prepared action.
+    """
+    run = store.get_run(run_id)
+    if run.state in (
+        RunState.PLANNED,
+        RunState.EXECUTING,
+        RunState.AWAITING_APPROVAL,
+        RunState.FAILED,
+    ):
+        run = execute_run(
+            run_id,
+            client,
+            store,
+            registry,
+            max_steps=max_steps,
+            max_cost_usd=max_cost_usd,
+            prices=prices,
+            task_pack=task_pack,
+        )
+    if run.state is RunState.VERIFYING:
+        run = verify_run(
+            run_id,
+            task_pack,
+            store,
+            erp_db_path=erp_db_path,
+            shared_root=shared_root,
+        )
+    report_run(run_id, store, evidence_root)
+    return store.get_run(run_id)
+
+
 def report_run(run_id: str, store: RunStore, evidence_root: str | Path) -> Path:
     """Write the Evidence Pack for a Run under its own directory."""
     run = store.get_run(run_id)

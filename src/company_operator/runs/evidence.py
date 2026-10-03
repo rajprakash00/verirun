@@ -37,6 +37,7 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
     journal = store.list_journal(run.id)
     verification = store.get_verification(run.id)
     escalations = store.list_escalations(run.id)
+    approvals = store.list_approvals(run.id)
     open_questions = list(run.work_order.open_questions) if run.work_order else []
     for escalation in escalations:
         if not escalation.resolved and escalation.question not in open_questions:
@@ -89,6 +90,25 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
                 "created_at": escalation.created_at.isoformat(),
             }
             for escalation in escalations
+        ],
+        "approvals": [
+            {
+                "id": request.id,
+                "key": request.key,
+                "step_id": request.step_id,
+                "tool": request.tool,
+                "action": request.action,
+                "arguments": request.arguments,
+                "policy": request.policy,
+                "rule": request.rule,
+                "reason": request.reason,
+                "status": request.status,
+                "decision_reason": request.decision_reason,
+                "decided_at": request.decided_at.isoformat() if request.decided_at else None,
+                "executed_at": request.executed_at.isoformat() if request.executed_at else None,
+                "created_at": request.created_at.isoformat(),
+            }
+            for request in approvals
         ],
         "verification": (
             {
