@@ -42,3 +42,15 @@ class Observation(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     error_kind: ErrorKind | None = None
     artifacts: list[str] = Field(default_factory=list)
+
+
+class CheckResult(BaseModel):
+    """The Verifier's pass/fail for one criterion, with its evidence references."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    description: str
+    ok: bool
+    detail: str = ""
+    evidence: list[str] = Field(default_factory=list)

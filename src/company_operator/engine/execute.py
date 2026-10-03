@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from company_operator.config import (
     DEFAULT_MAX_COST_USD,
@@ -25,7 +25,9 @@ from company_operator.llm.client import AssistantTurn, LLMClient, Message, ToolC
 from company_operator.llm.meter import CostMeter
 from company_operator.runs.models import Run
 from company_operator.runs.store import RunStore
-from company_operator.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from company_operator.tools.registry import ToolRegistry
 
 EXECUTE_SYSTEM_PROMPT = """\
 You are the Execute phase of Operator. You finish one Step of the Plan at a

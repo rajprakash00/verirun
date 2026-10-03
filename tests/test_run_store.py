@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from company_operator.context.models import ApprovalGate, WorkOrder
-from company_operator.engine.models import Observation, Plan, Step
+from company_operator.engine.models import CheckResult, Observation, Plan, Step
 from company_operator.engine.states import RunState, StepState
 from company_operator.runs.store import RunNotFoundError, RunStore
 
@@ -245,6 +245,47 @@ def test_store_migrates_a_database_from_the_previous_schema(tmp_path: Path) -> N
     )
     assert store.get_run("RUN-0001").steps_used == 1
     assert store.list_observations("RUN-0001")[0].tool == "files.list"
+
+
+def test_verification_results_round_trip_in_order(store: RunStore) -> None:
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+    results = [
+        CheckResult(
+            id="invoice-filed",
+            description="The invoice exists in LedgerLite.",
+            ok=True,
+            detail="INV-3003 matches the source document",
+            evidence=["erp:INV-3003", "source:documents/invoices/NW-2026-001.pdf"],
+        ),
+        CheckResult(
+            id="source-archived",
+            description="The source is archived.",
+            ok=False,
+            detail="no archive action was recorded",
+        ),
+    ]
+
+    store.save_verification("RUN-0001", results)
+
+    assert store.get_verification("RUN-0001") == results
+    assert store.get_verification("RUN-NOPE") == []
+
+
+def test_saving_verification_replaces_the_previous_results(store: RunStore) -> None:
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+    store.save_verification(
+        "RUN-0001",
+        [CheckResult(id="a", description="first", ok=False, detail="old")],
+    )
+
+    store.save_verification(
+        "RUN-0001",
+        [CheckResult(id="b", description="second", ok=True, detail="new")],
+    )
+
+    stored = store.get_verification("RUN-0001")
+    assert [result.id for result in stored] == ["b"]
+    assert stored[0].detail == "new"
 
 
 def test_failed_action_can_be_retried(store: RunStore) -> None:

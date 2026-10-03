@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     company_dir: Path = Path("company")
     tasks_dir: Path = Path("tasks")
     run_db: Path = Path("runs/operator.db")
+    shared_dir: Path = Path("shared")
+    mail_db: Path = Path("mocks/state/maildesk.db")
+    erp_db: Path = Path("mocks/state/ledgerlite.db")
     max_steps: int = DEFAULT_MAX_STEPS
     max_cost_usd: float = DEFAULT_MAX_COST_USD
     request_timeout_s: float = 120.0

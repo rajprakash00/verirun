@@ -3,7 +3,7 @@ import json
 import pytest
 
 from company_operator.context.company import load_company_context
-from company_operator.context.task_pack import load_task_pack
+from company_operator.context.task_pack import TaskPackError, load_task_pack
 from company_operator.engine.orchestrator import start_run
 from company_operator.engine.plan import plan_run
 from company_operator.engine.resolve import resolve
@@ -177,6 +177,17 @@ def test_start_run_rejects_a_task_pack_with_missing_context(tmp_path, context, t
     broken = task_pack.model_copy(update={"sop": "no-such-sop"})
 
     with pytest.raises(Exception, match="no-such-sop"):
+        start_run("Process the invoices", broken, context, ScriptedClient([]), store, run_id="RUN-0001")
+
+    assert store.list_runs() == []
+
+
+def test_start_run_rejects_a_task_pack_with_an_unregistered_check(tmp_path, context, task_pack) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    bad_check = task_pack.verification[0].model_copy(update={"check": "no_such_check"})
+    broken = task_pack.model_copy(update={"verification": [bad_check]})
+
+    with pytest.raises(TaskPackError, match="no_such_check"):
         start_run("Process the invoices", broken, context, ScriptedClient([]), store, run_id="RUN-0001")
 
     assert store.list_runs() == []

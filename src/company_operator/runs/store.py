@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from company_operator.context.models import WorkOrder
-from company_operator.engine.models import Observation, Plan, Step
+from company_operator.engine.models import CheckResult, Observation, Plan, Step
 from company_operator.engine.states import RunState, StepState, transition
 from company_operator.runs.models import (
     Checkpoint,
@@ -78,6 +78,18 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     state_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     PRIMARY KEY (run_id, label)
+);
+
+CREATE TABLE IF NOT EXISTS verifications (
+    run_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    id TEXT NOT NULL,
+    description TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, position)
 );
 """
 
@@ -395,6 +407,45 @@ class RunStore:
             state=json.loads(row["state_json"]),
             created_at=datetime.fromisoformat(row["created_at"]),
         )
+
+    def save_verification(self, run_id: str, results: list[CheckResult]) -> None:
+        """Replace the Run's verification results with this Verifier pass."""
+        with closing(self._connect()) as conn, conn:
+            conn.execute("DELETE FROM verifications WHERE run_id = ?", (run_id,))
+            for position, result in enumerate(results):
+                conn.execute(
+                    """
+                    INSERT INTO verifications
+                        (run_id, position, id, description, ok, detail, evidence_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        position,
+                        result.id,
+                        result.description,
+                        int(result.ok),
+                        result.detail,
+                        json.dumps(result.evidence),
+                        _iso(_now()),
+                    ),
+                )
+
+    def get_verification(self, run_id: str) -> list[CheckResult]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM verifications WHERE run_id = ? ORDER BY position", (run_id,)
+            ).fetchall()
+        return [
+            CheckResult(
+                id=row["id"],
+                description=row["description"],
+                ok=bool(row["ok"]),
+                detail=row["detail"],
+                evidence=json.loads(row["evidence_json"]),
+            )
+            for row in rows
+        ]
 
     def _update_run(self, run_id: str, assignments: str, params: tuple[Any, ...]) -> None:
         self._require(run_id)
