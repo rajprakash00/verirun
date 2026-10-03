@@ -49,6 +49,35 @@ an Evidence Pack.
 Failure escalation order is fixed: **retry → alternate strategy → re-plan → escalate**.
 A single orchestrator runs the loop; the Verifier is a separate phase, not a second worker.
 
+### Failure adaptation
+
+Every tool call is recorded as an Observation with its attempt number, so every
+retry stays visible. Failures resolve in a fixed order:
+
+1. **Retry** — transient failures are retried automatically, twice.
+2. **Alternate strategy** — the model sees the failure and may try another tool
+   or another argument.
+3. **Re-plan** — after three failed attempts on one Step, the engine asks the
+   planner for a revised plan, once, with the failure context (including the
+   side effects that already succeeded).
+4. **Escalate** — the Run parks in `needs_human` with an open question, and keeps
+   its plan, journal, and checkpoints so a human can resume it.
+
+Business conditions that retrying cannot fix skip the ladder. The documented
+terminal state for each seeded scenario:
+
+| Scenario | Terminal state | Recorded reason |
+| --- | --- | --- |
+| Transient write failure | `completed` after one retry | (none; the retry succeeds) |
+| Duplicate invoice | `needs_human` | the existing invoice id and status |
+| Amount mismatch | `needs_human` | invoice amount vs purchase order or goods receipt amount |
+| Missing purchase order | `needs_human` | the model's question asking for the PO |
+| Forbidden action | `needs_human` | the policy id and rule that denied the action |
+
+The model can also escalate explicitly with the engine-owned `task.escalate`
+tool when it finds a blocker no tool can resolve, such as a missing purchase
+order. The per-run step and cost meters bound the worst case: no scenario loops.
+
 ## 3. Company Context and the Work Order
 
 `company/` is committed knowledge: SOPs (Markdown), policies (YAML: spend limits,

@@ -138,6 +138,68 @@ def test_file_invoice_rejects_a_duplicate_or_an_unknown_vendor(ledgerlite_db: Pa
     assert fetch(ledgerlite_db, "SELECT * FROM invoices WHERE number = 'XX-2026-001'") == []
 
 
+def test_file_invoice_reports_a_duplicate_with_the_existing_record(
+    ledgerlite_db: Path,
+) -> None:
+    tools = registry(ledgerlite_db)
+
+    duplicate = tools.invoke(
+        "erp.file_invoice",
+        {"number": "AQ-2026-014", "vendor_id": "V-1002", "amount": 640.00},
+    )
+
+    assert duplicate.error_kind == "invalid"
+    assert duplicate.data["duplicate"] is True
+    assert duplicate.data["existing_invoice_id"] == "INV-3002"
+    assert duplicate.data["existing_status"] == "paid"
+
+
+def test_file_invoice_reports_an_amount_mismatch_with_the_comparison(
+    ledgerlite_db: Path,
+) -> None:
+    tools = registry(ledgerlite_db)
+
+    mismatch = tools.invoke(
+        "erp.file_invoice",
+        {
+            "number": "CD-2026-007",
+            "vendor_id": "V-1003",
+            "amount": 2100.00,
+            "po_id": "PO-2003",
+            "gr_id": "GR-2503",
+        },
+    )
+
+    assert mismatch.error_kind == "invalid"
+    assert mismatch.data["mismatch"] == "purchase_order"
+    assert mismatch.data["invoice_amount_cents"] == 210_000
+    assert mismatch.data["expected_amount_cents"] == 200_000
+    assert "2,100.00" in mismatch.summary
+    assert "2,000.00" in mismatch.summary
+    assert fetch(ledgerlite_db, "SELECT * FROM invoices WHERE number = 'CD-2026-007'") == []
+
+
+def test_file_invoice_reports_a_goods_receipt_mismatch(
+    ledgerlite_db: Path,
+) -> None:
+    tools = registry(ledgerlite_db)
+
+    mismatch = tools.invoke(
+        "erp.file_invoice",
+        {
+            "number": "NW-2026-001",
+            "vendor_id": "V-1001",
+            "amount": 1250.00,
+            "po_id": "PO-2001",
+            "gr_id": "GR-2502",
+        },
+    )
+
+    assert mismatch.error_kind == "invalid"
+    assert mismatch.data["mismatch"] == "goods_receipt"
+    assert mismatch.data["expected_amount_cents"] == 64_000
+
+
 def test_schedule_payment_writes_a_scheduled_payment_for_the_full_invoice(
     ledgerlite_db: Path,
 ) -> None:

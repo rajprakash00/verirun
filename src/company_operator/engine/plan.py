@@ -37,15 +37,26 @@ Rules:
 """
 
 
-def plan_run(work_order: WorkOrder, task_pack: TaskPack, client: LLMClient) -> Plan:
+def plan_run(
+    work_order: WorkOrder,
+    task_pack: TaskPack,
+    client: LLMClient,
+    *,
+    failure_context: str | None = None,
+) -> Plan:
+    user_message = _user_message(work_order, task_pack)
+    if failure_context:
+        user_message += (
+            "\n\nA previous attempt at this Work Order failed. Failure context:\n"
+            f"{failure_context}\n"
+            "Produce a revised plan that avoids the failure and repeats no side "
+            "effect that already succeeded."
+        )
     return complete_structured(
         client,
         [
             {"role": "system", "content": PLAN_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": _user_message(work_order, task_pack),
-            },
+            {"role": "user", "content": user_message},
         ],
         Plan,
         model_role="reason",

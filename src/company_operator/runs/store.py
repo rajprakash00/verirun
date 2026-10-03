@@ -13,6 +13,7 @@ from company_operator.engine.models import CheckResult, Observation, Plan, Step
 from company_operator.engine.states import RunState, StepState, transition
 from company_operator.runs.models import (
     Checkpoint,
+    Escalation,
     JournalEntry,
     ObservationRecord,
     Run,
@@ -55,6 +56,17 @@ CREATE TABLE IF NOT EXISTS observations (
     data_json TEXT NOT NULL DEFAULT '{}',
     error_kind TEXT,
     artifacts_json TEXT NOT NULL DEFAULT '[]',
+    attempt INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS escalations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    question TEXT NOT NULL,
+    context_json TEXT NOT NULL DEFAULT '{}',
+    resolved INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 
@@ -139,6 +151,10 @@ class RunStore:
         }
         if "tool" not in observation_columns:
             conn.execute("ALTER TABLE observations ADD COLUMN tool TEXT")
+        if "attempt" not in observation_columns:
+            conn.execute(
+                "ALTER TABLE observations ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1"
+            )
 
     def create_run(self, request: str, task_id: str, run_id: str | None = None) -> Run:
         run_id = run_id or generate_run_id()
@@ -162,18 +178,94 @@ class RunStore:
 
     def list_runs(self) -> list[RunSummary]:
         with closing(self._connect()) as conn:
-            rows = conn.execute("SELECT * FROM runs ORDER BY created_at, id").fetchall()
+            rows = conn.execute(
+                """
+                SELECT runs.*, (
+                    SELECT question FROM escalations
+                    WHERE escalations.run_id = runs.id AND escalations.resolved = 0
+                    ORDER BY escalations.id DESC LIMIT 1
+                ) AS open_question
+                FROM runs ORDER BY runs.created_at, runs.id
+                """
+            ).fetchall()
         return [
             RunSummary(
                 id=row["id"],
                 task_id=row["task_id"],
                 request=row["request"],
                 state=RunState(row["state"]),
+                question=row["open_question"],
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
             )
             for row in rows
         ]
+
+    def list_escalated_runs(self) -> list[RunSummary]:
+        """Runs parked for a human, each with its open question."""
+        return [
+            summary
+            for summary in self.list_runs()
+            if summary.state is RunState.NEEDS_HUMAN and summary.question is not None
+        ]
+
+    def escalate(
+        self,
+        run_id: str,
+        *,
+        reason: str,
+        question: str,
+        context: dict[str, Any] | None = None,
+    ) -> Escalation:
+        """Record an open question and park the Run in ``needs_human``."""
+        run = self.get_run(run_id)
+        transition(run.state, RunState.NEEDS_HUMAN)
+        moment = _iso(_now())
+        with closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO escalations (run_id, reason, question, context_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (run_id, reason, question, json.dumps(context or {}), moment),
+            )
+            escalation_id = int(cursor.lastrowid)
+        self.transition(run_id, RunState.NEEDS_HUMAN)
+        return Escalation(
+            id=escalation_id,
+            run_id=run_id,
+            reason=reason,
+            question=question,
+            context=context or {},
+            resolved=False,
+            created_at=datetime.fromisoformat(moment),
+        )
+
+    def resolve_escalations(self, run_id: str) -> None:
+        """Clear every open question for a Run, as when a human has answered."""
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                "UPDATE escalations SET resolved = 1 WHERE run_id = ? AND resolved = 0",
+                (run_id,),
+            )
+
+    def open_escalation(self, run_id: str) -> Escalation | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM escalations WHERE run_id = ? AND resolved = 0
+                ORDER BY id DESC LIMIT 1
+                """,
+                (run_id,),
+            ).fetchone()
+        return _row_to_escalation(row) if row is not None else None
+
+    def list_escalations(self, run_id: str) -> list[Escalation]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT * FROM escalations WHERE run_id = ? ORDER BY id", (run_id,)
+            ).fetchall()
+        return [_row_to_escalation(row) for row in rows]
 
     def transition(self, run_id: str, target: RunState) -> Run:
         run = self.get_run(run_id)
@@ -268,13 +360,14 @@ class RunStore:
         observation: Observation,
         step_position: int | None = None,
         tool: str | None = None,
+        attempt: int = 1,
     ) -> int:
         with closing(self._connect()) as conn, conn:
             cursor = conn.execute(
                 """
                 INSERT INTO observations (run_id, step_position, tool, ok, summary, data_json,
-                                          error_kind, artifacts_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          error_kind, artifacts_json, attempt, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -285,6 +378,7 @@ class RunStore:
                     json.dumps(observation.data),
                     observation.error_kind,
                     json.dumps(observation.artifacts),
+                    attempt,
                     _iso(_now()),
                 ),
             )
@@ -306,6 +400,7 @@ class RunStore:
                 data=json.loads(row["data_json"]),
                 error_kind=row["error_kind"],
                 artifacts=json.loads(row["artifacts_json"]),
+                attempt=row["attempt"],
                 created_at=datetime.fromisoformat(row["created_at"]),
             )
             for row in rows
@@ -382,6 +477,14 @@ class RunStore:
                 """,
                 (run_id, label, json.dumps(state), _iso(_now())),
             )
+
+    def count_checkpoints(self, run_id: str, *, prefix: str = "") -> int:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total FROM checkpoints WHERE run_id = ? AND label LIKE ?",
+                (run_id, f"{prefix}%"),
+            ).fetchone()
+        return int(row["total"])
 
     def get_checkpoint(self, run_id: str, label: str) -> dict[str, Any] | None:
         with closing(self._connect()) as conn:
@@ -488,6 +591,18 @@ def _row_to_run(row: sqlite3.Row) -> Run:
         cost_usd=row["cost_usd"],
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
+
+
+def _row_to_escalation(row: sqlite3.Row) -> Escalation:
+    return Escalation(
+        id=row["id"],
+        run_id=row["run_id"],
+        reason=row["reason"],
+        question=row["question"],
+        context=json.loads(row["context_json"]),
+        resolved=bool(row["resolved"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
     )
 
 

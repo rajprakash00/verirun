@@ -57,7 +57,13 @@ def start_run(
         work_order = resolve(request, task_pack, context, client)
         store.save_work_order(run.id, work_order)
         if work_order.open_questions:
-            return store.transition(run.id, RunState.NEEDS_HUMAN)
+            store.escalate(
+                run.id,
+                reason="resolve: the request cannot be completed from the Company Context",
+                question=work_order.open_questions[0],
+                context={"open_questions": list(work_order.open_questions)},
+            )
+            return store.get_run(run.id)
         run_plan = plan_run(work_order, task_pack, client)
         store.save_plan(run.id, run_plan)
         return store.transition(run.id, RunState.PLANNED)
@@ -96,6 +102,7 @@ def run_task(
                 max_steps=max_steps,
                 max_cost_usd=max_cost_usd,
                 prices=prices,
+                task_pack=task_pack,
             )
         if run.state is RunState.VERIFYING:
             run = verify_run(

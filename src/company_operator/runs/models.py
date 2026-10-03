@@ -37,6 +37,7 @@ class RunSummary(BaseModel):
     task_id: str
     request: str
     state: RunState
+    question: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -77,4 +78,19 @@ class ObservationRecord(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     error_kind: ErrorKind | None = None
     artifacts: list[str] = Field(default_factory=list)
+    attempt: int = 1
+    created_at: datetime
+
+
+class Escalation(BaseModel):
+    """A question for a human that parks the Run in ``needs_human``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    run_id: str
+    reason: str
+    question: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    resolved: bool = False
     created_at: datetime

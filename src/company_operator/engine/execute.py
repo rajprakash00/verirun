@@ -1,15 +1,20 @@
 """Execute and Observe: the ReAct tool loop over the Plan, with durable state.
 
 One Step at a time, the model thinks, calls one tool, and observes the result.
-Every Observation is stored on the Run with its failure class. Side-effect tools
-are journaled under an idempotency key, so a Run that crashes and restarts never
-repeats a completed side effect. Checkpoints after each Step mark where to
-resume. A Run that reaches its step or cost limit stops in a terminal state.
+Every Observation is stored on the Run with its failure class and attempt
+number. Failures resolve in a fixed order: transient failures are retried
+automatically, then the model may alternate strategy, then the engine re-plans
+once with the failure context, and finally the Run escalates to a human with an
+open question. Side-effect tools are journaled under an idempotency key, so a
+Run that crashes and restarts never repeats a completed side effect.
+Checkpoints after each Step mark where to resume. A Run that reaches its step
+or cost limit stops in a terminal state.
 """
 
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +24,18 @@ from company_operator.config import (
     DEFAULT_PRICES,
     ModelPrice,
 )
+from company_operator.engine.adapt import (
+    ESCALATE_SPEC,
+    ESCALATE_TOOL,
+    MAX_ATTEMPTS_PER_STEP,
+    MAX_REPLANS,
+    MAX_TRANSIENT_RETRIES,
+    FailureAction,
+    FailureDecision,
+    classify_failure,
+)
 from company_operator.engine.models import Observation, Step
+from company_operator.engine.plan import plan_run
 from company_operator.engine.states import RunState, StepState
 from company_operator.llm.client import AssistantTurn, LLMClient, Message, ToolCall
 from company_operator.llm.meter import CostMeter
@@ -27,6 +43,7 @@ from company_operator.runs.models import Run
 from company_operator.runs.store import RunStore
 
 if TYPE_CHECKING:
+    from company_operator.context.task_pack import TaskPack
     from company_operator.tools.registry import ToolRegistry
 
 EXECUTE_SYSTEM_PROMPT = """\
@@ -105,6 +122,12 @@ class RunBudget:
         self._store.increment_usage(self._run_id, steps=1)
 
 
+class StepOutcome(StrEnum):
+    DONE = "done"
+    ESCALATED = "escalated"
+    REPLAN = "replan"
+
+
 def execute_run(
     run_id: str,
     client: LLMClient,
@@ -114,16 +137,24 @@ def execute_run(
     max_steps: int = DEFAULT_MAX_STEPS,
     max_cost_usd: float = DEFAULT_MAX_COST_USD,
     prices: dict[str, ModelPrice] | None = None,
+    task_pack: TaskPack | None = None,
+    max_transient_retries: int = MAX_TRANSIENT_RETRIES,
+    max_attempts_per_step: int = MAX_ATTEMPTS_PER_STEP,
+    max_replans: int = MAX_REPLANS,
 ) -> Run:
-    """Execute a planned (or crashed) Run and hand it off to Verify.
+    """Execute a planned (or crashed, or escalated) Run and hand it to Verify.
 
     Resuming a Run is the same call: completed Steps are skipped, and journaled
-    side effects are never repeated.
+    side effects are never repeated. Passing the Task Pack enables re-planning;
+    without one, a worn-out Step escalates instead.
     """
     run = store.get_run(run_id)
     if run.plan is None:
         return run
     if run.state in (RunState.PLANNED, RunState.FAILED):
+        run = store.transition(run_id, RunState.EXECUTING)
+    elif run.state is RunState.NEEDS_HUMAN:
+        store.resolve_escalations(run_id)
         run = store.transition(run_id, RunState.EXECUTING)
     if run.state is not RunState.EXECUTING:
         return run
@@ -136,7 +167,19 @@ def execute_run(
         cost_usd=run.cost_usd,
         prices=prices,
     )
-    return _Executor(run, client, store, registry, budget).execute()
+    replannable = task_pack is not None and run.work_order is not None
+    executor = _Executor(
+        run,
+        client,
+        store,
+        registry,
+        budget,
+        task_pack=task_pack,
+        max_transient_retries=max_transient_retries,
+        max_attempts_per_step=max_attempts_per_step,
+        max_replans=max_replans if replannable else 0,
+    )
+    return executor.execute()
 
 
 class _Executor:
@@ -147,6 +190,11 @@ class _Executor:
         store: RunStore,
         registry: ToolRegistry,
         budget: RunBudget,
+        *,
+        task_pack: TaskPack | None = None,
+        max_transient_retries: int = MAX_TRANSIENT_RETRIES,
+        max_attempts_per_step: int = MAX_ATTEMPTS_PER_STEP,
+        max_replans: int = MAX_REPLANS,
     ) -> None:
         self.run = run
         self.run_id = run.id
@@ -154,19 +202,15 @@ class _Executor:
         self.store = store
         self.registry = registry
         self.budget = budget
+        self.task_pack = task_pack
+        self.max_transient_retries = max_transient_retries
+        self.max_attempts_per_step = max_attempts_per_step
+        self.max_replans = max_replans
+        self.replans_used = store.count_checkpoints(run.id, prefix="replan-")
 
     def execute(self) -> Run:
-        plan = self.run.plan
         try:
-            completed = self._resume_position()
-            step_states = self.store.get_step_states(self.run_id)
-            for position, step in enumerate(plan.steps):
-                if position <= completed:
-                    continue
-                if position < len(step_states) and step_states[position] is StepState.DONE:
-                    continue
-                self._execute_step(position, step, total=len(plan.steps))
-            return self.store.transition(self.run_id, RunState.VERIFYING)
+            return self._execute_plan()
         except BudgetExceeded as exc:
             self.store.set_error(self.run_id, str(exc))
             return self.store.transition(self.run_id, RunState.LIMIT_REACHED)
@@ -175,18 +219,51 @@ class _Executor:
             self.store.transition(self.run_id, RunState.FAILED)
             raise
 
+    def _execute_plan(self) -> Run:
+        plan = self.run.plan
+        completed = self._resume_position()
+        position = 0
+        while position < len(plan.steps):
+            step = plan.steps[position]
+            step_states = self.store.get_step_states(self.run_id)
+            if position <= completed or (
+                position < len(step_states) and step_states[position] is StepState.DONE
+            ):
+                position += 1
+                continue
+            outcome = self._execute_step(position, step, total=len(plan.steps))
+            if outcome is StepOutcome.ESCALATED:
+                return self.store.get_run(self.run_id)
+            if outcome is StepOutcome.REPLAN:
+                self.replans_used += 1
+                self._apply_replan(position)
+                self.run = self.store.get_run(self.run_id)
+                plan = self.run.plan
+                completed = -1
+                position = 0
+                continue
+            position += 1
+        return self.store.transition(self.run_id, RunState.VERIFYING)
+
     def _resume_position(self) -> int:
-        """The position of the last Step completed before a crash, or -1."""
+        """The position of the last Step completed before a crash, or -1.
+
+        Only checkpoints from completed Steps count. A re-plan checkpoint also
+        records the position that failed, but the revised plan must be executed
+        from the start.
+        """
         checkpoint = self.store.latest_checkpoint(self.run_id)
-        if checkpoint is None:
+        if checkpoint is None or checkpoint.state.get("phase") != "executing":
             return -1
         position = checkpoint.state.get("step_position")
         return position if isinstance(position, int) else -1
 
-    def _execute_step(self, position: int, step: Step, *, total: int) -> None:
+    def _execute_step(self, position: int, step: Step, *, total: int) -> StepOutcome:
         self.store.set_step_state(self.run_id, position, StepState.RUNNING)
         messages = self._messages(position, step, total)
-        tools = self.registry.specs_for(step.allowed_tools)
+        tools = [*self.registry.specs_for(step.allowed_tools), ESCALATE_SPEC]
+        failed_attempts = 0
+        transient_attempts = 0
         while True:
             self.budget.check()
             turn = self.client.complete(messages, tools=tools, model_role="loop")
@@ -195,11 +272,39 @@ class _Executor:
             if not turn.tool_calls:
                 break
             call = turn.tool_calls[0]
+            if call.name == ESCALATE_TOOL:
+                self._model_escalation(position, call)
+                return StepOutcome.ESCALATED
             observation = self._call(step, call)
+            attempt = 1
             self.budget.record_step()
-            self.store.add_observation(
-                self.run_id, observation, step_position=position, tool=call.name
-            )
+            self._record(position, call.name, observation, attempt)
+            while not observation.ok:
+                decision = self._decision(
+                    observation,
+                    failed_attempts=failed_attempts,
+                    transient_attempts=transient_attempts,
+                )
+                if decision.action is FailureAction.RETRY:
+                    transient_attempts += 1
+                    attempt += 1
+                    self.budget.check()
+                    observation = self._call(step, call)
+                    self.budget.record_step()
+                    self._record(position, call.name, observation, attempt)
+                    continue
+                failed_attempts += 1
+                if decision.action is FailureAction.REPLAN:
+                    return StepOutcome.REPLAN
+                if decision.action is FailureAction.ESCALATE:
+                    self._escalate(
+                        decision,
+                        tool=call.name,
+                        arguments=call.arguments,
+                        step_position=position,
+                    )
+                    return StepOutcome.ESCALATED
+                break
             messages.append(_assistant_message(turn, call))
             messages.append(_tool_message(call.id, observation))
         self.store.set_step_state(self.run_id, position, StepState.DONE)
@@ -207,6 +312,112 @@ class _Executor:
             self.run_id,
             f"step-{position + 1}",
             {"phase": "executing", "step_position": position, "step_id": step.id},
+        )
+        return StepOutcome.DONE
+
+    def _decision(
+        self,
+        observation: Observation,
+        *,
+        failed_attempts: int,
+        transient_attempts: int,
+    ) -> FailureDecision:
+        return classify_failure(
+            observation,
+            failed_attempts=failed_attempts,
+            transient_attempts=transient_attempts,
+            replans_used=self.replans_used,
+            max_transient_retries=self.max_transient_retries,
+            max_attempts=self.max_attempts_per_step,
+            max_replans=self.max_replans,
+        )
+
+    def _record(
+        self, position: int, tool: str, observation: Observation, attempt: int
+    ) -> None:
+        self.store.add_observation(
+            self.run_id,
+            observation,
+            step_position=position,
+            tool=tool,
+            attempt=attempt,
+        )
+
+    def _model_escalation(self, position: int, call: ToolCall) -> None:
+        reason = str(call.arguments.get("reason") or "").strip() or "the model asked for help"
+        question = str(call.arguments.get("question") or "").strip() or reason
+        self.store.add_observation(
+            self.run_id,
+            Observation(
+                ok=False,
+                summary=f"Escalated: {reason}",
+                error_kind="ambiguity",
+                data={"reason": reason, "question": question},
+            ),
+            step_position=position,
+            tool=ESCALATE_TOOL,
+        )
+        self.store.escalate(
+            self.run_id,
+            reason=reason,
+            question=question,
+            context={"step_position": position, "arguments": call.arguments},
+        )
+
+    def _escalate(
+        self,
+        decision: FailureDecision,
+        *,
+        tool: str,
+        arguments: dict[str, Any],
+        step_position: int,
+    ) -> None:
+        question = decision.question or f"{decision.reason}. How should the Run proceed?"
+        self.store.escalate(
+            self.run_id,
+            reason=decision.reason,
+            question=question,
+            context={
+                **decision.context,
+                "tool": tool,
+                "arguments": arguments,
+                "step_position": step_position,
+            },
+        )
+
+    def _apply_replan(self, position: int) -> None:
+        observations = [
+            observation
+            for observation in self.store.list_observations(self.run_id)
+            if observation.step_position == position
+        ]
+        failures = [
+            f"- {item.tool or '(model)'} [{item.error_kind or 'failed'}] "
+            f"attempt {item.attempt}: {item.summary}"
+            for item in observations
+            if not item.ok
+        ]
+        completed = [
+            f"- {entry.action} {json.dumps(entry.payload, sort_keys=True)} succeeded"
+            for entry in self.store.list_journal(self.run_id)
+            if entry.status == "done"
+        ]
+        sections = ["Failed attempts:"]
+        sections.extend(failures or ["- (none recorded)"])
+        sections.append("Completed side effects (never repeat these):")
+        sections.extend(completed or ["- (none)"])
+        failure_context = "\n".join(sections)
+        plan = plan_run(
+            self.run.work_order,
+            self.task_pack,
+            self.client,
+            failure_context=failure_context,
+        )
+        self.store.save_plan(self.run_id, plan)
+        self.store.save_checkpoint(
+            self.run_id,
+            f"replan-{self.replans_used}",
+            {"phase": "replanning", "step_position": position, "failure": failure_context},
         )
 
     def _call(self, step: Step, call: ToolCall) -> Observation:

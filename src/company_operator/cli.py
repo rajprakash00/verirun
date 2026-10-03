@@ -17,7 +17,7 @@ from company_operator.engine.models import CheckResult
 from company_operator.engine.orchestrator import report_run, run_task
 from company_operator.engine.states import RunState
 from company_operator.llm.client import LLMClient, build_client
-from company_operator.runs.models import Run
+from company_operator.runs.models import Escalation, Run
 from company_operator.runs.store import RunStore, generate_run_id
 from company_operator.tools import (
     PolicyGate,
@@ -116,7 +116,14 @@ def _run_command(
         return 1
 
     evidence_path = settings.run_db.parent / run.id / "evidence.json"
-    print(format_run(run, store.get_verification(run.id), evidence_path))
+    print(
+        format_run(
+            run,
+            store.get_verification(run.id),
+            evidence_path,
+            escalation=store.open_escalation(run.id),
+        )
+    )
     return 0 if run.state is RunState.COMPLETED else 1
 
 
@@ -137,10 +144,16 @@ def format_run(
     run: Run,
     verification: list[CheckResult] | None = None,
     evidence_path: Path | None = None,
+    escalation: Escalation | None = None,
 ) -> str:
     lines = [f"Run {run.id}  state: {run.state.value}", f"Task: {run.task_id}", ""]
     if run.work_order is not None:
         lines.extend(_work_order_lines(run.work_order))
+    if escalation is not None:
+        lines.append("Escalation")
+        lines.append(f"  Reason: {escalation.reason}")
+        lines.append(f"  Question: {escalation.question}")
+        lines.append("")
     if run.plan is not None:
         lines.append("Plan")
         for position, step in enumerate(run.plan.steps, start=1):
