@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Callable
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -28,6 +28,12 @@ from company_operator.tools.vision import read_scanned_invoice
 FILE_FIELD = re.compile(r"^Vendor:\s*(.+)$", re.MULTILINE)
 NUMBER_FIELD = re.compile(r"^Invoice number:\s*(\S+)$", re.MULTILINE)
 AMOUNT_FIELD = re.compile(r"^Amount due:\s*([\d,]+\.\d{2})\s*([A-Z]{3})$", re.MULTILINE)
+
+TAX_FORM_MARKER = "Taxpayer Identification Number"
+TAX_FORM_NAME = re.compile(r"^Name:\s*(.+)$", re.MULTILINE)
+TAX_FORM_TAX_ID = re.compile(r"^Taxpayer Identification Number:\s*(\S+)\s*$", re.MULTILINE)
+TAX_FORM_ADDRESS = re.compile(r"^Address:\s*(.+)$", re.MULTILINE)
+TAX_FORM_EMAIL = re.compile(r"^Email:\s*(\S+)\s*$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -100,11 +106,16 @@ def _find_source(context: VerificationContext, number: str) -> Path | None:
     return matches[0] if matches else None
 
 
-def _parse_source(path: Path) -> dict[str, Any]:
-    """Read the invoice fields out of the source PDF, independent of any tool."""
+def _pdf_text(path: Path) -> str:
+    """The text layer of a PDF, joined across pages."""
     from pypdf import PdfReader
 
-    text = "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
+    return "\n".join(page.extract_text() or "" for page in PdfReader(str(path)).pages)
+
+
+def _parse_source(path: Path) -> dict[str, Any]:
+    """Read the invoice fields out of the source PDF, independent of any tool."""
+    text = _pdf_text(path)
     vendor = FILE_FIELD.search(text)
     number = NUMBER_FIELD.search(text)
     amount = AMOUNT_FIELD.search(text)
@@ -326,9 +337,130 @@ def check_file_archived(params: dict[str, Any], context: VerificationContext) ->
     return CheckOutcome(True, f"{len(claims)} source document(s) archived in '{directory}'", tuple(evidence))
 
 
+def _vendor_for_claim(
+    context: VerificationContext, entry: JournalEntry
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve the LedgerLite row a vendor creation claim names."""
+    data = (entry.result or {}).get("data") or {}
+    vendor_id = data.get("vendor_id")
+    if not isinstance(vendor_id, str) or not vendor_id:
+        return None, f"{entry.key}: the creation action names no vendor id"
+    rows = _erp_rows(context, "SELECT * FROM vendors WHERE id = ?", (vendor_id,))
+    if len(rows) != 1:
+        return None, f"LedgerLite has {len(rows)} vendor(s) with id {vendor_id}, expected one"
+    return rows[0], None
+
+
+def _parse_tax_form(path: Path) -> dict[str, str]:
+    """Read the vendor fields out of a tax form PDF, independent of any tool."""
+    text = _pdf_text(path)
+    name = TAX_FORM_NAME.search(text)
+    tax_id = TAX_FORM_TAX_ID.search(text)
+    address = TAX_FORM_ADDRESS.search(text)
+    email = TAX_FORM_EMAIL.search(text)
+    if name is None or tax_id is None or address is None or email is None:
+        raise ValueError("the tax form has no readable vendor fields")
+    return {
+        "name": name.group(1).strip(),
+        "tax_id": tax_id.group(1),
+        "address": address.group(1).strip(),
+        "email": email.group(1),
+    }
+
+
+def _find_tax_forms(
+    context: VerificationContext, tax_id: str
+) -> list[tuple[Path, dict[str, str] | None]]:
+    """Every tax form in the shared tree that carries this tax id.
+
+    Copies are allowed; a form that cannot be parsed is returned with ``None``
+    so the check can report it instead of silently ignoring it.
+    """
+    matches: list[tuple[Path, dict[str, str] | None]] = []
+    for path in sorted(context.shared_root.rglob("*.pdf")):
+        text = ""
+        with suppress(Exception):  # an unreadable PDF is simply not a match
+            text = _pdf_text(path)
+        if tax_id not in text or TAX_FORM_MARKER not in text:
+            continue
+        parsed: dict[str, str] | None = None
+        with suppress(Exception):
+            parsed = _parse_tax_form(path)
+        matches.append((path, parsed))
+    return matches
+
+
+def check_erp_vendor_matches(
+    params: dict[str, Any], context: VerificationContext
+) -> CheckOutcome:
+    """Every created vendor exists exactly once and agrees with its tax form."""
+    match_fields = params.get("match") or ["name", "tax_id", "email", "address"]
+    claims = _claims(context, "erp.create_vendor")
+    if not claims:
+        return CheckOutcome(False, "no successful erp.create_vendor action is recorded on this Run")
+    failures: list[str] = []
+    evidence: list[str] = []
+    for entry in claims:
+        vendor, problem = _vendor_for_claim(context, entry)
+        if problem is not None:
+            failures.append(problem)
+            continue
+        vendor_id = vendor["id"]
+        duplicates = _erp_rows(
+            context,
+            "SELECT * FROM vendors WHERE tax_id = ? OR name = ?",
+            (vendor["tax_id"], vendor["name"]),
+        )
+        if len(duplicates) != 1 or duplicates[0]["id"] != vendor_id:
+            failures.append(
+                f"{vendor_id}: tax id {vendor['tax_id']} or name {vendor['name']!r} "
+                f"appears on {len(duplicates)} vendors, expected exactly one"
+            )
+            continue
+        sources = _find_tax_forms(context, vendor["tax_id"])
+        if not sources:
+            failures.append(
+                f"{vendor_id}: no tax form with tax id {vendor['tax_id']} was found"
+            )
+            continue
+        unreadable = [path.name for path, parsed in sources if parsed is None]
+        if unreadable:
+            failures.append(
+                f"{vendor_id}: cannot read tax form(s): {', '.join(unreadable)}"
+            )
+            continue
+        reads = {
+            tuple(parsed.get(field) for field in match_fields) for _, parsed in sources
+        }
+        if len(reads) > 1:
+            failures.append(
+                f"{vendor_id}: {len(sources)} tax forms with tax id "
+                f"{vendor['tax_id']} disagree on the vendor fields"
+            )
+            continue
+        source, parsed = sources[0]
+        reference = source.relative_to(context.shared_root).as_posix()
+        for field in match_fields:
+            if parsed.get(field) != vendor.get(field):
+                failures.append(
+                    f"{vendor_id}: {field} {vendor.get(field)!r} does not match "
+                    f"the tax form {parsed.get(field)!r}"
+                )
+        if not any(failure.startswith(vendor_id) for failure in failures):
+            evidence.extend([f"erp:{vendor_id}", f"source:{reference}"])
+    if failures:
+        return CheckOutcome(False, "; ".join(failures), tuple(evidence))
+    return CheckOutcome(
+        True,
+        f"{len(claims)} created vendor(s) agree with their tax forms and LedgerLite records",
+        tuple(evidence),
+    )
+
+
 CHECKS: dict[str, CheckFunction] = {
     "erp_invoice_matches": check_erp_invoice_matches,
     "erp_payment_state": check_erp_payment_state,
+    "erp_vendor_matches": check_erp_vendor_matches,
     "file_archived": check_file_archived,
 }
 

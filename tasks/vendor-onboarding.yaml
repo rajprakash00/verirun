@@ -1,0 +1,46 @@
+id: vendor-onboarding
+title: Vendor onboarding
+goal_template: >-
+  Turn vendor onboarding requests from the procurement mailbox into validated
+  vendors in LedgerLite, with the required tax form archived and any required
+  human approval obtained. Request: {request}
+sop: vendor-onboarding
+policies:
+  - vendor-management
+tools:
+  - mail.list
+  - mail.read
+  - mail.mark_read
+  - files.list
+  - files.read
+  - files.write
+  - files.move
+  - files.archive
+  - erp.list_vendors
+  - erp.get_vendor
+  - erp.create_vendor
+approval_rules:
+  - id: vendor-creation
+    description: >-
+      Creating a vendor is irreversible: prepare it, but wait for a human
+      decision before submitting.
+    policy: vendor-management
+    actions:
+      - vendor.create
+verification:
+  - id: vendor-created
+    description: >-
+      The vendor exists in LedgerLite exactly once with the legal name, tax id,
+      address, and contact email from the tax form.
+    check: erp_vendor_matches
+    params:
+      match:
+        - name
+        - tax_id
+        - address
+        - email
+  - id: tax-document-archived
+    description: The source tax form is in the archive folder.
+    check: file_archived
+    params:
+      directory: archive

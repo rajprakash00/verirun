@@ -172,7 +172,7 @@ class VendorOnboardingScenario:
     contact_email: str
     tax_id: str
     address: str
-    tax_form_filename: str
+    tax_form_filename: str | None = None
 
 
 VENDOR_ONBOARDING = VendorOnboardingScenario(
@@ -185,4 +185,33 @@ VENDOR_ONBOARDING = VendorOnboardingScenario(
     tax_form_filename="cascade-fabrication-w9.pdf",
 )
 
+VENDOR_DUPLICATE = VendorOnboardingScenario(
+    key="vendor_duplicate",
+    company_name="Apex Office Supplies",
+    contact_name="Rina Patel",
+    contact_email="accounts@apex-office.example",
+    tax_id="TAX-1002",
+    address="1190 Commerce Street, Boise, ID 83702",
+    tax_form_filename="apex-office-supplies-w9.pdf",
+)
+
+VENDOR_MISSING_TAX_FORM = VendorOnboardingScenario(
+    key="vendor_missing_tax_form",
+    company_name="Meridian Plastics",
+    contact_name="Jonah Reed",
+    contact_email="accounts@meridian-plastics.example",
+    tax_id="TAX-2002",
+    address="77 Harbor Road, Duluth, MN 55802",
+    tax_form_filename=None,
+)
+
+VENDOR_SCENARIOS: tuple[VendorOnboardingScenario, ...] = (
+    VENDOR_ONBOARDING,
+    VENDOR_DUPLICATE,
+    VENDOR_MISSING_TAX_FORM,
+)
+
 SCENARIOS_BY_KEY: dict[str, InvoiceScenario] = {scenario.key: scenario for scenario in SCENARIOS}
+VENDOR_SCENARIOS_BY_KEY: dict[str, VendorOnboardingScenario] = {
+    scenario.key: scenario for scenario in VENDOR_SCENARIOS
+}

@@ -26,6 +26,8 @@ the procurement mailbox.
   address, and contact email. Vendor creation is an irreversible action and
   waits for a human approval gate.
 
-## 5. Verify and report
+## 5. Archive, verify, and report
 
-- Verify the vendor exists in LedgerLite with the expected tax id, then report.
+- Move the tax form to the archive folder and record where it went.
+- Verify the vendor exists in LedgerLite exactly once with the expected tax id
+  and contact fields, then report.

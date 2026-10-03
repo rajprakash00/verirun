@@ -27,11 +27,11 @@ def test_seed_creates_one_message_per_scenario_plus_requests(tmp_path: Path) -> 
 
     messages = fetch_all(tmp_path / "maildesk.db", "messages")
 
-    assert len(messages) == 9
+    assert len(messages) == 11
     assert {message["scenario"] for message in messages} == {
         *[scenario.key for scenario in scenarios.SCENARIOS if scenario.key != scenarios.HAPPY.key],
         "batch",
-        scenarios.VENDOR_ONBOARDING.key,
+        *[vendor.key for vendor in scenarios.VENDOR_SCENARIOS],
     }
 
 
@@ -47,12 +47,13 @@ def test_failure_scenario_messages_carry_their_scenario_attachment(tmp_path: Pat
     for message in messages:
         if message["scenario"] == "batch":
             continue
-        if message["scenario"] == scenarios.VENDOR_ONBOARDING.key:
-            expected = [scenarios.VENDOR_ONBOARDING.tax_form_filename]
+        if message["scenario"] in scenarios.VENDOR_SCENARIOS_BY_KEY:
+            vendor = scenarios.VENDOR_SCENARIOS_BY_KEY[message["scenario"]]
+            expected = [vendor.tax_form_filename] if vendor.tax_form_filename else []
         else:
             invoice = scenarios.SCENARIOS_BY_KEY[message["scenario"]]
             expected = [f"{invoice.invoice_number}.pdf"]
-        assert by_message[message["id"]] == expected
+        assert by_message.get(message["id"], []) == expected
 
 
 def test_batch_message_attaches_the_text_layer_invoices(tmp_path: Path) -> None:
@@ -102,7 +103,7 @@ def test_every_attachment_points_at_a_shared_tree_file(tmp_path: Path) -> None:
     reset_and_seed(tmp_path / "maildesk.db", shared_root)
 
     attachments = fetch_all(tmp_path / "maildesk.db", "attachments")
-    assert len(attachments) == 15
+    assert len(attachments) == 16
     for attachment in attachments:
         path = shared_root / attachment["path"]
         assert path.is_file(), attachment["path"]

@@ -31,7 +31,7 @@ def test_seed_suite_serves_the_inbox_and_the_shared_files(tmp_path: Path) -> Non
         assert "Invoice batch for processing" in inbox.text
 
         messages = client.get("/api/messages").json()
-        assert len(messages) == 9
+        assert len(messages) == 11
         for message in messages:
             detail = client.get(f"/api/messages/{message['id']}").json()
             for attachment in detail["attachments"]:

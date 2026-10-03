@@ -11,6 +11,7 @@ CREATE TABLE vendors (
     name TEXT NOT NULL,
     tax_id TEXT NOT NULL,
     email TEXT NOT NULL,
+    address TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL CHECK (status IN ('active', 'blocked', 'pending')),
     created_at TEXT NOT NULL,
     scenario TEXT NOT NULL

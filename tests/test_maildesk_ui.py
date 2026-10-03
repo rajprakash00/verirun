@@ -38,7 +38,7 @@ def test_api_lists_messages_and_exposes_attachments(maildesk_client: TestClient)
 
     assert response.status_code == 200
     messages = {message["id"]: message for message in response.json()}
-    assert len(messages) == 9
+    assert len(messages) == 11
     assert messages["MSG-7001"]["scenario"] == "batch"
 
     detail = maildesk_client.get("/api/messages/MSG-7001").json()

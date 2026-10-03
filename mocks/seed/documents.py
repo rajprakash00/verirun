@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from mocks.seed.scenarios import (
     SCANNED,
     SCENARIOS,
-    VENDOR_ONBOARDING,
+    VENDOR_SCENARIOS,
     InvoiceScenario,
     VendorOnboardingScenario,
 )
@@ -47,9 +47,12 @@ def write_documents(shared_root: Path) -> None:
             write_scanned_invoice(path, scenario)
         else:
             write_invoice(path, scenario)
-    form_path = shared_root / tax_form_relpath(VENDOR_ONBOARDING)
-    form_path.parent.mkdir(parents=True, exist_ok=True)
-    write_tax_form(form_path, VENDOR_ONBOARDING)
+    for scenario in VENDOR_SCENARIOS:
+        if scenario.tax_form_filename is None:
+            continue
+        form_path = shared_root / tax_form_relpath(scenario)
+        form_path.parent.mkdir(parents=True, exist_ok=True)
+        write_tax_form(form_path, scenario)
 
 
 def _invoice_lines(scenario: InvoiceScenario) -> list[str]:

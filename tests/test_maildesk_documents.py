@@ -39,17 +39,15 @@ def test_scanned_invoice_pdf_has_no_text_layer(tmp_path: Path) -> None:
     assert len(page.images) == 1
 
 
-def test_vendor_tax_form_pdf_carries_an_extractable_text_layer(tmp_path: Path) -> None:
+def test_vendor_tax_form_pdfs_carry_an_extractable_text_layer(tmp_path: Path) -> None:
     shared_root = tmp_path / "shared"
     reset_and_seed(tmp_path / "maildesk.db", shared_root)
 
-    path = (
-        shared_root
-        / "documents"
-        / "vendor-onboarding"
-        / scenarios.VENDOR_ONBOARDING.tax_form_filename
-    )
-    text = extracted_text(path)
-
-    assert scenarios.VENDOR_ONBOARDING.company_name in text
-    assert scenarios.VENDOR_ONBOARDING.tax_id in text
+    for scenario in scenarios.VENDOR_SCENARIOS:
+        if scenario.tax_form_filename is None:
+            continue
+        path = shared_root / "documents" / "vendor-onboarding" / scenario.tax_form_filename
+        text = extracted_text(path)
+        assert scenario.company_name in text
+        assert scenario.tax_id in text
+        assert scenario.contact_email in text
