@@ -110,6 +110,33 @@ PLAN = {
 
 FILED_INVOICE_ID = "INV-3003"
 
+SCAN_PATH = "documents/invoices/PP-2026-042.pdf"
+
+VISION_FIELDS = {
+    "vendor_name": {"value": "Paperline Print Shop", "confidence": 0.97},
+    "invoice_number": {"value": "PP-2026-042", "confidence": 0.99},
+    "amount": {"value": "1,050.00", "confidence": 0.95},
+    "currency": {"value": "USD", "confidence": 0.98},
+    "purchase_order": {"value": "PO-2008", "confidence": 0.94},
+    "goods_receipt": {"value": "GR-2508", "confidence": 0.93},
+}
+
+
+def vision_fields(**confidences: float) -> str:
+    """The strict-schema JSON a scripted vision model replies with."""
+    fields = json.loads(json.dumps(VISION_FIELDS))
+    for name, confidence in confidences.items():
+        fields[name]["confidence"] = confidence
+    return json.dumps(fields)
+
+
+def vision_turn(**confidences: float) -> AssistantTurn:
+    return AssistantTurn(
+        model="deepseek-v4-flash-vision-exp",
+        text=vision_fields(**confidences),
+        usage=Usage(prompt_tokens=1200, completion_tokens=120),
+    )
+
 OVER_LIMIT_PLAN = {
     "steps": [
         {
@@ -201,7 +228,7 @@ def park_over_limit_run(
         context,
         script,
         store,
-        build_registry(settings, context, task_pack),
+        build_registry(settings, context, task_pack, script),
         erp_db_path=ledgerlite_db,
         shared_root=maildesk_state.shared_root,
         evidence_root=settings.run_db.parent,

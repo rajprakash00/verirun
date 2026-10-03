@@ -4,11 +4,20 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from company_operator.validation import format_validation_errors
 
 ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+
+SCAN_TOOL = "files.extract"
 
 
 class TaskPackError(ValueError):
@@ -22,6 +31,14 @@ class ApprovalRule(BaseModel):
     description: str = ""
     policy: str | None = None
     actions: list[str] = Field(default_factory=list)
+
+
+class ExtractionConfig(BaseModel):
+    """How far a document extraction is trusted before a human is asked."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confidence_threshold: float = Field(ge=0.0, le=1.0)
 
 
 class VerificationCheck(BaseModel):
@@ -53,6 +70,7 @@ class TaskPack(BaseModel):
     tools: list[str] = Field(min_length=1)
     approval_rules: list[ApprovalRule] = Field(default_factory=list)
     verification: list[VerificationCheck] = Field(default_factory=list)
+    extraction: ExtractionConfig | None = None
 
     @field_validator("policies")
     @classmethod
@@ -75,6 +93,14 @@ class TaskPack(BaseModel):
     def _unique_verification(cls, checks: list[VerificationCheck]) -> list[VerificationCheck]:
         _reject_duplicates([check.id for check in checks], "verification check")
         return checks
+
+    @model_validator(mode="after")
+    def _scan_tool_needs_a_threshold(self) -> TaskPack:
+        if SCAN_TOOL in self.tools and self.extraction is None:
+            raise ValueError(
+                f"tool '{SCAN_TOOL}' is allowlisted but no extraction.confidence_threshold is set"
+            )
+        return self
 
     def policy_ids(self) -> list[str]:
         return list(dict.fromkeys(self.policies))

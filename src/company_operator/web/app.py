@@ -82,12 +82,13 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
         run = store.get_run(run_id)
         context = load_company_context(settings.company_dir)
         task_pack = load_task_pack(settings.tasks_dir / f"{run.task_id}.yaml")
+        client = make_client(run_id)
         resume_run(
             run_id,
             task_pack,
-            make_client(run_id),
+            client,
             store,
-            build_registry(settings, context, task_pack),
+            build_registry(settings, context, task_pack, client),
             erp_db_path=settings.erp_db,
             shared_root=settings.shared_dir,
             evidence_root=settings.run_db.parent,

@@ -130,6 +130,14 @@ class RunBudget:
         self.steps_used += 1
         self._store.increment_usage(self._run_id, steps=1)
 
+    def record_tool_cost(self, observation: Observation) -> None:
+        """Count the cost a tool reports for its own model call, such as vision."""
+        cost = observation.data.get("cost_usd")
+        if isinstance(cost, bool) or not isinstance(cost, (int, float)) or cost <= 0:
+            return
+        self.cost_usd += float(cost)
+        self._store.increment_usage(self._run_id, cost_usd=float(cost))
+
 
 class StepOutcome(StrEnum):
     DONE = "done"
@@ -364,6 +372,7 @@ class _Executor:
             tool=tool,
             attempt=attempt,
         )
+        self.budget.record_tool_cost(observation)
 
     def _model_escalation(self, position: int, call: ToolCall) -> None:
         reason = str(call.arguments.get("reason") or "").strip() or "the model asked for help"

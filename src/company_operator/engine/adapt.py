@@ -144,4 +144,13 @@ def _terminal_failure(observation: Observation) -> FailureDecision | None:
             question=f"{observation.summary}. How should the difference be resolved?",
             context=data,
         )
+    if data.get("low_confidence"):
+        return FailureDecision(
+            FailureAction.ESCALATE,
+            reason=f"low-confidence extraction: {observation.summary}",
+            question=(
+                f"{observation.summary}. Should the scanned document be reviewed by a human?"
+            ),
+            context=data,
+        )
     return None

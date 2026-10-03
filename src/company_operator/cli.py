@@ -89,7 +89,7 @@ def _run_command(
         run_id = generate_run_id()
         llm = client or build_client(settings, session_id=run_id)
         store = RunStore(settings.run_db)
-        registry = build_registry(settings, context, task_pack)
+        registry = build_registry(settings, context, task_pack, llm)
         run = run_task(
             args.request,
             task_pack,

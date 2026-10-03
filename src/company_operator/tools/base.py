@@ -20,7 +20,7 @@ class ToolError(Exception):
         self, kind: ErrorKind, message: str, data: dict[str, Any] | None = None
     ) -> None:
         super().__init__(message)
-        self.kind = kind
+        self.kind: ErrorKind = kind
         self.message = message
         self.data = data or {}
 

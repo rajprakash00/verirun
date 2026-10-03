@@ -112,6 +112,65 @@ def test_evidence_for_an_unverified_run_reports_its_state(tmp_path: Path) -> Non
     assert evidence["artifacts"] == []
 
 
+def test_evidence_carries_extracted_fields_and_confidences(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    seed_completed_run(store)
+    store.add_observation(
+        "RUN-0001",
+        Observation(
+            ok=True,
+            summary="Extracted fields from 'documents/invoices/PP-2026-042.pdf'",
+            data={
+                "path": "documents/invoices/PP-2026-042.pdf",
+                "method": "vision",
+                "pages": 1,
+                "threshold": 0.8,
+                "min_confidence": 0.93,
+                "fields": {
+                    "invoice_number": {"value": "PP-2026-042", "confidence": 0.99},
+                    "amount_cents": {"value": 105_000, "confidence": 0.95},
+                },
+            },
+        ),
+        step_position=0,
+        tool="files.extract",
+    )
+    store.add_observation(
+        "RUN-0001",
+        Observation(
+            ok=False,
+            summary="the scan has fields below the confidence threshold 0.80: amount (0.42)",
+            error_kind="invalid",
+            data={
+                "path": "documents/invoices/QQ-2026-001.pdf",
+                "method": "vision",
+                "threshold": 0.8,
+                "min_confidence": 0.42,
+                "fields": {"amount_cents": {"value": 9000, "confidence": 0.42}},
+                "low_confidence": True,
+            },
+        ),
+        step_position=0,
+        tool="files.extract",
+    )
+
+    evidence = build_evidence(store.get_run("RUN-0001"), store)
+
+    extractions = {item["path"]: item for item in evidence["extractions"]}
+    assert set(extractions) == {
+        "documents/invoices/PP-2026-042.pdf",
+        "documents/invoices/QQ-2026-001.pdf",
+    }
+    scan = extractions["documents/invoices/PP-2026-042.pdf"]
+    assert scan["ok"] is True
+    assert scan["method"] == "vision"
+    assert scan["min_confidence"] == 0.93
+    assert scan["fields"]["amount_cents"] == {"value": 105_000, "confidence": 0.95}
+    low = extractions["documents/invoices/QQ-2026-001.pdf"]
+    assert low["ok"] is False
+    assert low["fields"]["amount_cents"]["confidence"] == 0.42
+
+
 def test_evidence_carries_approval_requests_and_decisions(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "runs" / "operator.db")
     store.create_run("Process the invoices", "invoice-processing", run_id="RUN-0004")

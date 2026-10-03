@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from company_operator.context.task_pack import SCAN_TOOL
 from company_operator.engine.states import RunState
 from company_operator.runs.models import ObservationRecord, Run
 from company_operator.runs.store import RunStore
@@ -29,6 +30,24 @@ def collect_artifacts(observations: list[ObservationRecord]) -> list[str]:
             if isinstance(path, str) and path:
                 artifacts.append(path)
     return sorted(dict.fromkeys(artifacts))
+
+
+def collect_extractions(observations: list[ObservationRecord]) -> list[dict[str, Any]]:
+    """Every document extraction with its per-field confidence values."""
+    return [
+        {
+            "path": record.data.get("path"),
+            "method": record.data.get("method"),
+            "pages": record.data.get("pages"),
+            "threshold": record.data.get("threshold"),
+            "min_confidence": record.data.get("min_confidence"),
+            "fields": record.data.get("fields"),
+            "ok": record.ok,
+            "summary": record.summary,
+        }
+        for record in observations
+        if record.tool == SCAN_TOOL
+    ]
 
 
 def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
@@ -119,6 +138,7 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
             else None
         ),
         "artifacts": collect_artifacts(observations),
+        "extractions": collect_extractions(observations),
         "open_questions": open_questions,
         "cost_usd": run.cost_usd,
         "steps_used": run.steps_used,
