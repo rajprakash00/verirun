@@ -9,12 +9,20 @@ from company_operator.engine.models import ErrorKind, Observation
 
 
 class ToolError(Exception):
-    """A tool failure that carries the Observation error kind to report."""
+    """A tool failure that carries the Observation error kind to report.
 
-    def __init__(self, kind: ErrorKind, message: str) -> None:
+    ``data`` carries structured detail for the engine's failure policy, for
+    example the comparison behind an amount mismatch or the existing record
+    behind a duplicate.
+    """
+
+    def __init__(
+        self, kind: ErrorKind, message: str, data: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
+        self.data = data or {}
 
 
 class Tool(ABC):
@@ -38,7 +46,7 @@ class Tool(ABC):
         try:
             return self.run(arguments)
         except ToolError as exc:
-            return Observation(ok=False, summary=exc.message, error_kind=exc.kind)
+            return Observation(ok=False, summary=exc.message, error_kind=exc.kind, data=exc.data)
         except Exception as exc:  # noqa: BLE001 - tools must never raise into the engine
             return Observation(
                 ok=False,

@@ -55,6 +55,41 @@ def file_invoice(
     return observation.data["invoice_id"]
 
 
+def file_invoice_directly(
+    store: RunStore,
+    erp_db: Path,
+    *,
+    amount_cents: int,
+    run_id: str = "RUN-0001",
+    key: str = "file-1",
+) -> str:
+    """Seed an ERP row without the write tool.
+
+    The Verifier must catch wrong ground truth even when it was not written by
+    this Run's executor, so this test setup bypasses the tool that would have
+    rejected the amount.
+    """
+    with ledgerlite.connect(erp_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO invoices
+                (id, number, vendor_id, po_id, gr_id, amount_cents, status, received_at, scenario)
+            VALUES ('INV-9001', 'NW-2026-001', 'V-1001', 'PO-2001', 'GR-2501', ?, 'received',
+                    '2026-09-05T09:00:00+00:00', 'filed')
+            """,
+            (amount_cents,),
+        )
+        conn.commit()
+    arguments = {"number": "NW-2026-001", "vendor_id": "V-1001", "amount": amount_cents / 100}
+    store.record_action(run_id, key, "erp.file_invoice", arguments)
+    store.complete_action(
+        run_id,
+        key,
+        {"invoice_id": "INV-9001", "number": "NW-2026-001", "vendor_id": "V-1001"},
+    )
+    return "INV-9001"
+
+
 def schedule_payment(store: RunStore, erp_db: Path, invoice_id: str, *, run_id: str = "RUN-0001") -> None:
     tools = ToolRegistry(build_erp_tools(erp_db), allowlist=["erp.schedule_payment"])
     observation = tools.invoke(
@@ -155,7 +190,7 @@ def test_a_wrong_amount_in_the_erp_is_caught_against_the_source_document(
 ) -> None:
     store = RunStore(tmp_path / "runs.db")
     seed_verifying_run(store)
-    invoice_id = file_invoice(store, ledgerlite_db, amount=999.00)
+    invoice_id = file_invoice_directly(store, ledgerlite_db, amount_cents=99_900)
     schedule_payment(store, ledgerlite_db, invoice_id)
     archive_source(store, maildesk_state.shared_root, INVOICE["number"])
 

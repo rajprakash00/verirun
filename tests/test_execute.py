@@ -115,6 +115,93 @@ class QuietTool(Tool):
         raise AssertionError("step-level enforcement should have blocked this call")
 
 
+class FlakyOnceTool(Tool):
+    """Fails transiently on the first call, then succeeds."""
+
+    name = "test.flaky_once"
+    description = "Fails transiently once."
+    parameters: ClassVar[dict[str, Any]] = NO_ARGUMENTS
+    side_effect = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, args: dict[str, Any]) -> Observation:
+        self.calls += 1
+        if self.calls == 1:
+            raise ToolError("transient", "the UI blinked")
+        return Observation(ok=True, summary="pong", data={"calls": self.calls})
+
+
+class AlwaysFailsTool(Tool):
+    name = "test.always_fails"
+    description = "Always fails with a rejected form."
+    parameters: ClassVar[dict[str, Any]] = NO_ARGUMENTS
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, args: dict[str, Any]) -> Observation:
+        self.calls += 1
+        raise ToolError("invalid", "the form was rejected")
+
+
+class FailingWriteTool(Tool):
+    """A ``files.write`` double that always fails, for replan tests."""
+
+    name = "files.write"
+    description = "Always fails."
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    }
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, args: dict[str, Any]) -> Observation:
+        self.calls += 1
+        raise ToolError("invalid", "the form was rejected")
+
+
+class FailingTwiceWriteTool(Tool):
+    """Fails twice, then succeeds; for replan-resume tests."""
+
+    name = "files.write"
+    description = "Fails twice, then succeeds."
+    side_effect = True
+    parameters: ClassVar[dict[str, Any]] = {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    }
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, args: dict[str, Any]) -> Observation:
+        self.calls += 1
+        if self.calls < 3:
+            raise ToolError("invalid", "the form was rejected")
+        return Observation(ok=True, summary="wrote the file")
+
+
+def one_step_plan(tool: str, *, step_id: str = "step-1") -> dict[str, Any]:
+    return {
+        "steps": [
+            {
+                "id": step_id,
+                "goal": f"Use {tool}",
+                "allowed_tools": [tool],
+                "done_criterion": "the tool succeeded",
+            }
+        ]
+    }
+
+
 def seed_planned_run(store: RunStore, plan: dict[str, Any], run_id: str = "RUN-0001") -> None:
     """Persist a planned Run without the LLM, for plans with test-only tools."""
     store.create_run("Process the invoices", "test-task", run_id=run_id)
@@ -398,7 +485,14 @@ def test_every_failure_class_is_recorded_on_its_observation(tmp_path: Path) -> N
         ]
     )
 
-    run = execute_run("RUN-0001", client, store, registry)
+    run = execute_run(
+        "RUN-0001",
+        client,
+        store,
+        registry,
+        max_transient_retries=0,
+        max_attempts_per_step=4,
+    )
 
     assert run.state is RunState.VERIFYING
     observations = store.list_observations("RUN-0001")
@@ -468,3 +562,252 @@ def test_mutating_tools_are_marked_as_side_effects(tmp_path: Path) -> None:
     assert TypeTool.side_effect
     assert SelectTool.side_effect
     assert not SnapshotTool.side_effect
+
+
+def test_a_transient_failure_is_retried_automatically_then_succeeds(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    seed_planned_run(store, one_step_plan("test.flaky_once"))
+    tool = FlakyOnceTool()
+    registry = ToolRegistry([tool], allowlist=["test.flaky_once"])
+    client = ScriptedClient([tool_turn("test.flaky_once"), text_turn("Recovered.")])
+
+    run = execute_run("RUN-0001", client, store, registry)
+
+    assert run.state is RunState.VERIFYING
+    assert tool.calls == 2
+    observations = store.list_observations("RUN-0001")
+    assert [(item.ok, item.error_kind, item.attempt) for item in observations] == [
+        (False, "transient", 1),
+        (True, None, 2),
+    ]
+    assert [entry.status for entry in store.list_journal("RUN-0001")] == ["done"]
+    assert len(client.calls) == 2
+
+
+def test_the_model_can_escalate_with_a_question(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    seed_planned_run(store, one_step_plan("test.ping"))
+    registry = ToolRegistry([PingTool()], allowlist=["test.ping"])
+    client = ScriptedClient(
+        [
+            tool_turn(
+                "task.escalate",
+                {
+                    "reason": "No purchase order exists for BP-2026-123",
+                    "question": "Which purchase order covers BP-2026-123?",
+                },
+                call_id="e1",
+            )
+        ]
+    )
+
+    run = execute_run("RUN-0001", client, store, registry)
+
+    assert run.state is RunState.NEEDS_HUMAN
+    escalation = store.open_escalation("RUN-0001")
+    assert escalation is not None
+    assert escalation.question == "Which purchase order covers BP-2026-123?"
+    assert "No purchase order" in escalation.reason
+    assert [summary.id for summary in store.list_escalated_runs()] == ["RUN-0001"]
+    assert store.list_observations("RUN-0001")[-1].tool == "task.escalate"
+
+
+def test_repeated_failures_are_bounded_when_replanning_is_unavailable(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    seed_planned_run(store, one_step_plan("test.always_fails"))
+    tool = AlwaysFailsTool()
+    registry = ToolRegistry([tool], allowlist=["test.always_fails"])
+    client = ScriptedClient([tool_turn("test.always_fails") for _ in range(10)])
+
+    run = execute_run("RUN-0001", client, store, registry, max_attempts_per_step=3)
+
+    assert run.state is RunState.NEEDS_HUMAN
+    assert tool.calls == 3
+    assert len(store.list_observations("RUN-0001")) == 3
+    escalation = store.open_escalation("RUN-0001")
+    assert escalation is not None
+    assert "the form was rejected" in escalation.reason
+
+
+def test_persistent_failures_replan_once_with_context_then_escalate(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    task_pack = load_task_pack(ROOT / "tasks" / "invoice-processing.yaml")
+    context = load_company_context(ROOT / "company")
+    replan = one_step_plan("files.write")
+    replan["steps"][0]["goal"] = "Try another way"
+    client = ScriptedClient(
+        [
+            json.dumps(WORK_ORDER),
+            json.dumps(one_step_plan("files.write")),
+            tool_turn("files.write", {"path": "a", "content": "b"}),
+            json.dumps(replan),
+            tool_turn("files.write", {"path": "a", "content": "b"}),
+        ]
+    )
+    start_run(
+        "Process the invoices in the AP mailbox",
+        task_pack,
+        context,
+        client,
+        store,
+        run_id="RUN-0001",
+    )
+    tool = FailingWriteTool()
+    registry = ToolRegistry([tool], allowlist=["files.write"])
+
+    run = execute_run(
+        "RUN-0001",
+        client,
+        store,
+        registry,
+        task_pack=task_pack,
+        max_attempts_per_step=1,
+        max_replans=1,
+    )
+
+    assert run.state is RunState.NEEDS_HUMAN
+    assert tool.calls == 2
+    assert [step.goal for step in run.plan.steps] == ["Try another way"]
+    assert store.get_checkpoint("RUN-0001", "replan-1") is not None
+    escalation = store.open_escalation("RUN-0001")
+    assert escalation is not None
+    assert "the form was rejected" in escalation.reason
+
+
+def test_resuming_after_a_replan_reexecutes_the_replanned_step(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    task_pack = load_task_pack(ROOT / "tasks" / "invoice-processing.yaml")
+    context = load_company_context(ROOT / "company")
+    replan = one_step_plan("files.write")
+    replan["steps"][0]["goal"] = "Try another way"
+    starting_client = ScriptedClient(
+        [
+            json.dumps(WORK_ORDER),
+            json.dumps(one_step_plan("files.write")),
+            tool_turn("files.write", {"path": "a", "content": "b"}),
+            json.dumps(replan),
+            tool_turn("files.write", {"path": "a", "content": "b"}),
+        ]
+    )
+    start_run(
+        "Process the invoices in the AP mailbox",
+        task_pack,
+        context,
+        starting_client,
+        store,
+        run_id="RUN-0001",
+    )
+    tool = FailingTwiceWriteTool()
+    registry = ToolRegistry([tool], allowlist=["files.write"])
+    parked = execute_run(
+        "RUN-0001",
+        starting_client,
+        store,
+        registry,
+        task_pack=task_pack,
+        max_attempts_per_step=1,
+        max_replans=1,
+    )
+    assert parked.state is RunState.NEEDS_HUMAN
+    assert tool.calls == 2
+
+    run = execute_run(
+        "RUN-0001",
+        ScriptedClient(
+            [
+                tool_turn("files.write", {"path": "a", "content": "b"}),
+                text_turn("Wrote it."),
+            ]
+        ),
+        store,
+        registry,
+        task_pack=task_pack,
+        max_attempts_per_step=1,
+        max_replans=1,
+    )
+
+    assert run.state is RunState.VERIFYING
+    assert tool.calls == 3
+    assert store.get_step_states("RUN-0001") == ["done"]
+
+
+def test_replans_are_bounded_across_resumes(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    task_pack = load_task_pack(ROOT / "tasks" / "invoice-processing.yaml")
+    context = load_company_context(ROOT / "company")
+    replan = one_step_plan("files.write")
+    replan["steps"][0]["goal"] = "Try another way"
+    client = ScriptedClient(
+        [
+            json.dumps(WORK_ORDER),
+            json.dumps(one_step_plan("files.write")),
+            tool_turn("files.write", {"path": "a", "content": "b"}),
+            json.dumps(replan),
+            tool_turn("files.write", {"path": "a", "content": "b"}),
+        ]
+    )
+    start_run(
+        "Process the invoices in the AP mailbox",
+        task_pack,
+        context,
+        client,
+        store,
+        run_id="RUN-0001",
+    )
+    tool = FailingWriteTool()
+    registry = ToolRegistry([tool], allowlist=["files.write"])
+    execute_run(
+        "RUN-0001",
+        client,
+        store,
+        registry,
+        task_pack=task_pack,
+        max_attempts_per_step=1,
+        max_replans=1,
+    )
+
+    run = execute_run(
+        "RUN-0001",
+        ScriptedClient([tool_turn("files.write", {"path": "a", "content": "b"})]),
+        store,
+        registry,
+        task_pack=task_pack,
+        max_attempts_per_step=1,
+        max_replans=1,
+    )
+
+    assert run.state is RunState.NEEDS_HUMAN
+    assert tool.calls == 3
+    assert len([c for c in store.list_escalations("RUN-0001")]) == 2
+
+
+def test_an_escalated_run_resumes_after_the_human_answers(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    seed_planned_run(store, one_step_plan("test.ping"))
+    registry = ToolRegistry([PingTool()], allowlist=["test.ping"])
+    parked = execute_run(
+        "RUN-0001",
+        ScriptedClient(
+            [
+                tool_turn(
+                    "task.escalate",
+                    {"reason": "unsure", "question": "Which invoice first?"},
+                    call_id="e1",
+                )
+            ]
+        ),
+        store,
+        registry,
+    )
+    assert parked.state is RunState.NEEDS_HUMAN
+
+    run = execute_run(
+        "RUN-0001",
+        ScriptedClient([tool_turn("test.ping"), text_turn("Done.")]),
+        store,
+        registry,
+    )
+
+    assert run.state is RunState.VERIFYING
+    assert store.open_escalation("RUN-0001") is None
+    assert store.list_escalations("RUN-0001")[0].resolved is True

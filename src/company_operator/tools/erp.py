@@ -44,6 +44,10 @@ def parse_amount(raw: Any) -> int:
     return int(cents)
 
 
+def _money(cents: int, currency: str) -> str:
+    return f"{cents / 100:,.2f} {currency}"
+
+
 def _next_id(conn: sqlite3.Connection, table: str, prefix: str) -> str:
     row = conn.execute(
         f"SELECT id FROM {table} WHERE id LIKE ?"
@@ -287,18 +291,62 @@ class FileInvoiceTool(ErpTool):
         currency = optional_str(args, "currency", "USD") or "USD"
         with closing(self.connect()) as conn:
             self.one(conn, "vendors", vendor_id, "vendor")
-            if po_id:
-                self.one(conn, "purchase_orders", po_id, "purchase order")
-            if gr_id:
-                self.one(conn, "goods_receipts", gr_id, "goods receipt")
             existing = conn.execute(
-                "SELECT id FROM invoices WHERE vendor_id = ? AND number = ?",
+                "SELECT id, status FROM invoices WHERE vendor_id = ? AND number = ?",
                 (vendor_id, number),
             ).fetchone()
             if existing is not None:
                 raise ToolError(
-                    "invalid", f"Invoice {number} already exists for {vendor_id} as {existing['id']}"
+                    "invalid",
+                    f"Invoice {number} already exists for {vendor_id} as {existing['id']}",
+                    data={
+                        "duplicate": True,
+                        "number": number,
+                        "vendor_id": vendor_id,
+                        "existing_invoice_id": existing["id"],
+                        "existing_status": existing["status"],
+                    },
                 )
+            if po_id:
+                order = self.one(conn, "purchase_orders", po_id, "purchase order")
+                if order["amount_cents"] != amount_cents:
+                    raise ToolError(
+                        "invalid",
+                        (
+                            f"Invoice {number} is {_money(amount_cents, currency)} but "
+                            f"purchase order {po_id} is "
+                            f"{_money(order['amount_cents'], currency)}"
+                        ),
+                        data={
+                            "mismatch": "purchase_order",
+                            "number": number,
+                            "vendor_id": vendor_id,
+                            "po_id": po_id,
+                            "invoice_amount_cents": amount_cents,
+                            "expected_amount_cents": order["amount_cents"],
+                            "currency": currency,
+                        },
+                    )
+            if gr_id:
+                receipt = self.one(conn, "goods_receipts", gr_id, "goods receipt")
+                if receipt["amount_cents"] != amount_cents:
+                    raise ToolError(
+                        "invalid",
+                        (
+                            f"Invoice {number} is {_money(amount_cents, currency)} but "
+                            f"goods receipt {gr_id} is "
+                            f"{_money(receipt['amount_cents'], currency)}"
+                        ),
+                        data={
+                            "mismatch": "goods_receipt",
+                            "number": number,
+                            "vendor_id": vendor_id,
+                            "gr_id": gr_id,
+                            "invoice_amount_cents": amount_cents,
+                            "expected_amount_cents": receipt["amount_cents"],
+                            "currency": currency,
+                        },
+                    )
             failure = _consume_failure(conn, f"invoice.create:{number}")
             if failure is not None:
                 raise ToolError("transient", failure)

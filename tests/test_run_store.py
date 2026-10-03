@@ -137,6 +137,89 @@ def test_observations_round_trip_in_order(store: RunStore) -> None:
     assert stored[1].created_at.tzinfo is not None
 
 
+def test_observations_carry_their_attempt_number(store: RunStore) -> None:
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+
+    store.add_observation(
+        "RUN-0001",
+        Observation(ok=False, summary="the UI blinked", error_kind="transient"),
+        step_position=0,
+        tool="erp.file_invoice",
+        attempt=1,
+    )
+    store.add_observation(
+        "RUN-0001",
+        Observation(ok=True, summary="filed the invoice"),
+        step_position=0,
+        tool="erp.file_invoice",
+        attempt=2,
+    )
+
+    stored = store.list_observations("RUN-0001")
+    assert [observation.attempt for observation in stored] == [1, 2]
+    assert [observation.tool for observation in stored] == [
+        "erp.file_invoice",
+        "erp.file_invoice",
+    ]
+
+
+def test_escalation_records_a_question_and_parks_the_run(store: RunStore) -> None:
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+    store.transition("RUN-0001", RunState.RESOLVING)
+    store.save_plan("RUN-0001", plan())
+    store.transition("RUN-0001", RunState.PLANNED)
+
+    escalation = store.escalate(
+        "RUN-0001",
+        reason="duplicate invoice: AQ-2026-014 already exists as INV-3002 (paid)",
+        question="Invoice AQ-2026-014 already exists as INV-3002. Should it be ignored?",
+        context={"existing_invoice_id": "INV-3002"},
+    )
+
+    assert escalation.run_id == "RUN-0001"
+    assert escalation.resolved is False
+    assert escalation.context == {"existing_invoice_id": "INV-3002"}
+    assert escalation.created_at.tzinfo is not None
+    assert store.get_run("RUN-0001").state is RunState.NEEDS_HUMAN
+    assert store.open_escalation("RUN-0001") == escalation
+
+
+def test_escalated_runs_are_listed_with_their_open_question(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    store.create_run("duplicate one", "invoice-processing", run_id="RUN-0001")
+    store.transition("RUN-0001", RunState.RESOLVING)
+    store.create_run("a quiet one", "invoice-processing", run_id="RUN-0002")
+    question = "Invoice AQ-2026-014 already exists as INV-3002. Should it be ignored?"
+    store.escalate(
+        "RUN-0001",
+        reason="duplicate invoice: AQ-2026-014 already exists as INV-3002 (paid)",
+        question=question,
+    )
+
+    escalated = store.list_escalated_runs()
+
+    assert [(row.id, row.question) for row in escalated] == [("RUN-0001", question)]
+    assert escalated[0].state is RunState.NEEDS_HUMAN
+    summaries = {row.id: row for row in store.list_runs()}
+    assert summaries["RUN-0001"].question == question
+    assert summaries["RUN-0002"].question is None
+
+
+def test_resolving_an_escalation_clears_the_open_question(store: RunStore) -> None:
+    store.create_run("request", "invoice-processing", run_id="RUN-0001")
+    store.transition("RUN-0001", RunState.RESOLVING)
+    store.escalate("RUN-0001", reason="missing PO", question="Which PO covers BP-2026-123?")
+
+    store.resolve_escalations("RUN-0001")
+
+    assert store.open_escalation("RUN-0001") is None
+    assert store.list_escalated_runs() == []
+    history = store.list_escalations("RUN-0001")
+    assert len(history) == 1
+    assert history[0].resolved is True
+    assert history[0].question == "Which PO covers BP-2026-123?"
+
+
 def test_journal_is_idempotent_by_key(store: RunStore) -> None:
     store.create_run("request", "invoice-processing", run_id="RUN-0001")
 
@@ -244,7 +327,11 @@ def test_store_migrates_a_database_from_the_previous_schema(tmp_path: Path) -> N
         tool="files.list",
     )
     assert store.get_run("RUN-0001").steps_used == 1
-    assert store.list_observations("RUN-0001")[0].tool == "files.list"
+    observations = store.list_observations("RUN-0001")
+    assert observations[0].tool == "files.list"
+    assert observations[0].attempt == 1
+    store.escalate("RUN-0001", reason="old database", question="Does migration hold?")
+    assert store.open_escalation("RUN-0001").question == "Does migration hold?"
 
 
 def test_verification_results_round_trip_in_order(store: RunStore) -> None:
@@ -314,3 +401,6 @@ def test_checkpoints_round_trip_and_latest_wins(store: RunStore) -> None:
     assert latest.created_at.tzinfo is not None
     assert store.get_checkpoint("RUN-0001", "missing") is None
     assert store.latest_checkpoint("RUN-0001").created_at >= datetime(2020, 1, 1, tzinfo=UTC)
+    assert store.count_checkpoints("RUN-0001") == 2
+    store.save_checkpoint("RUN-0001", "replan-1", {"phase": "replanning"})
+    assert store.count_checkpoints("RUN-0001", prefix="replan-") == 1

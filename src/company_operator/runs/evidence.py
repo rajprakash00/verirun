@@ -36,6 +36,11 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
     observations = store.list_observations(run.id)
     journal = store.list_journal(run.id)
     verification = store.get_verification(run.id)
+    escalations = store.list_escalations(run.id)
+    open_questions = list(run.work_order.open_questions) if run.work_order else []
+    for escalation in escalations:
+        if not escalation.resolved and escalation.question not in open_questions:
+            open_questions.append(escalation.question)
     verified = run.state is RunState.COMPLETED
     return {
         "run_id": run.id,
@@ -69,9 +74,21 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
                 "summary": record.summary,
                 "error_kind": record.error_kind,
                 "artifacts": record.artifacts,
+                "attempt": record.attempt,
                 "created_at": record.created_at.isoformat(),
             }
             for record in observations
+        ],
+        "escalations": [
+            {
+                "id": escalation.id,
+                "reason": escalation.reason,
+                "question": escalation.question,
+                "context": escalation.context,
+                "resolved": escalation.resolved,
+                "created_at": escalation.created_at.isoformat(),
+            }
+            for escalation in escalations
         ],
         "verification": (
             {
@@ -82,7 +99,7 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
             else None
         ),
         "artifacts": collect_artifacts(observations),
-        "open_questions": list(run.work_order.open_questions) if run.work_order else [],
+        "open_questions": open_questions,
         "cost_usd": run.cost_usd,
         "steps_used": run.steps_used,
         "error": run.error,
