@@ -10,12 +10,8 @@ import base64
 from pathlib import Path
 
 from company_operator.engine.orchestrator import report_run
-from company_operator.runs.evidence import (
-    build_evidence,
-    render_evidence_html,
-    write_evidence,
-    write_evidence_html,
-)
+from company_operator.runs.evidence import build_evidence, write_evidence
+from company_operator.runs.report import render_evidence_html, write_evidence_html
 from company_operator.runs.store import RunStore
 from tests.support import seed_completed_run
 

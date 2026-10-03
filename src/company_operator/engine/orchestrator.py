@@ -17,8 +17,9 @@ from company_operator.engine.resolve import resolve
 from company_operator.engine.states import RunState
 from company_operator.engine.verify import CHECKS, verify_run
 from company_operator.llm.client import LLMClient
-from company_operator.runs.evidence import write_evidence, write_evidence_html
+from company_operator.runs.evidence import write_evidence
 from company_operator.runs.models import Run
+from company_operator.runs.report import write_evidence_html
 from company_operator.runs.store import RunNotFoundError, RunStore, generate_run_id
 from company_operator.tools.registry import ToolRegistry
 

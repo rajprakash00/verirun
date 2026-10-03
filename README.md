@@ -37,8 +37,9 @@ uv run playwright install chromium          # add --with-deps on a fresh Linux b
 cp .env.example .env                        # fill in OPERATOR_API_KEY for live runs
 ```
 
-The demo and the test suite run offline and need no API key. Only `operator run`
-in the default `live` mode calls the model gateway.
+The demo and the test suite run offline and need no API key. Live model calls
+happen only when you start a request (`operator run`) or approve a parked Run in
+the dashboard; both use the gateway settings from `.env`.
 
 ## Run the demo
 

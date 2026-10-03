@@ -47,7 +47,8 @@ from mocks.seed.suite import reset_and_seed_suite
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUEST = "Process the invoices in the AP mailbox"
-FILED_INVOICE_ID = "INV-3003"
+# Each scenario reseeds first, so the first invoice it files is always INV-3003.
+NEXT_FILED_INVOICE = "INV-3003"
 
 WORK_ORDER = {
     "sop": "invoice-processing",
@@ -198,8 +199,8 @@ def happy_script(with_browser: bool, ledgerlite_url: str | None) -> DemoLLM:
             },
             "c4",
         ),
-        text_turn(f"Filed as {FILED_INVOICE_ID}."),
-        tool_turn("erp.schedule_payment", {"invoice_id": FILED_INVOICE_ID}, "c5"),
+        text_turn(f"Filed as {NEXT_FILED_INVOICE}."),
+        tool_turn("erp.schedule_payment", {"invoice_id": NEXT_FILED_INVOICE}, "c5"),
         tool_turn(
             "files.archive",
             {"path": "documents/invoices/NW-2026-001.pdf", "directory": "processed"},
@@ -236,7 +237,7 @@ def transient_script() -> DemoLLM:
                 },
                 "c3",
             ),
-            tool_turn("erp.schedule_payment", {"invoice_id": FILED_INVOICE_ID}, "c4"),
+            tool_turn("erp.schedule_payment", {"invoice_id": NEXT_FILED_INVOICE}, "c4"),
             text_turn("Filed and scheduled."),
             tool_turn(
                 "files.archive",
@@ -265,7 +266,7 @@ def over_limit_script() -> DemoLLM:
                 "c1",
             ),
             text_turn("Filed SI-2026-550."),
-            tool_turn("erp.schedule_payment", {"invoice_id": FILED_INVOICE_ID}, "c2"),
+            tool_turn("erp.schedule_payment", {"invoice_id": NEXT_FILED_INVOICE}, "c2"),
             # Consumed after the human approval resumes the Run.
             text_turn("Payment scheduled."),
             tool_turn(
@@ -425,7 +426,7 @@ def run_approval(
 
 
 def describe(store: RunStore, label: str, run: Run) -> None:
-    html_path = store.path.parent / run.id / "evidence.html"
+    html_path = (store.path.parent / run.id / "evidence.json").with_suffix(".html")
     verified = "verified" if run.state is RunState.COMPLETED else run.state.value
     print(
         f"  [{label}] {run.id}: {run.state.value} ({verified}) · "

@@ -134,7 +134,7 @@ def _report_command(args: argparse.Namespace, settings: Settings | None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(f"Evidence Pack written to {path}")
-    print(f"Evidence report written to {path.parent / 'evidence.html'}")
+    print(f"Evidence Pack HTML written to {path.with_suffix('.html')}")
     return 0 if run.state is RunState.COMPLETED else 1
 
 

@@ -295,7 +295,9 @@ def seed_completed_run(store: RunStore, run_id: str = "RUN-0001") -> None:
     )
     store.add_observation(
         run_id,
-        Observation(ok=True, summary="Screenshot saved", artifacts=["runs/RUN-0001/shot.png"]),
+        Observation(
+            ok=True, summary="Screenshot saved", artifacts=[f"runs/{run_id}/shot.png"]
+        ),
         step_position=2,
         tool="browser.screenshot",
     )
