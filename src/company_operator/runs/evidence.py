@@ -2,7 +2,8 @@
 
 The Report phase writes this file for every Run. It carries the result, the Work
 Order, the Plan, the action log, the Verifier's results with evidence references,
-the artifacts, the open questions, and the cost and step counters.
+the artifacts, the open questions, and the cost and step counters. The static
+HTML rendering of the same payload lives in ``company_operator.runs.report``.
 """
 
 from __future__ import annotations
@@ -92,6 +93,7 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
                 "tool": record.tool,
                 "ok": record.ok,
                 "summary": record.summary,
+                "data": record.data,
                 "error_kind": record.error_kind,
                 "artifacts": record.artifacts,
                 "attempt": record.attempt,

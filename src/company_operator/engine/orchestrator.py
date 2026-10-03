@@ -19,6 +19,7 @@ from company_operator.engine.verify import CHECKS, verify_run
 from company_operator.llm.client import LLMClient
 from company_operator.runs.evidence import write_evidence
 from company_operator.runs.models import Run
+from company_operator.runs.report import write_evidence_html
 from company_operator.runs.store import RunNotFoundError, RunStore, generate_run_id
 from company_operator.tools.registry import ToolRegistry
 
@@ -171,6 +172,12 @@ def resume_run(
 
 
 def report_run(run_id: str, store: RunStore, evidence_root: str | Path) -> Path:
-    """Write the Evidence Pack for a Run under its own directory."""
+    """Write the Evidence Pack for a Run under its own directory.
+
+    Writing also renders the static ``evidence.html`` report from the JSON plus
+    the screenshots in the Run directory. The JSON path is returned.
+    """
     run = store.get_run(run_id)
-    return write_evidence(run, store, Path(evidence_root) / run.id)
+    json_path = write_evidence(run, store, Path(evidence_root) / run.id)
+    write_evidence_html(json_path)
+    return json_path

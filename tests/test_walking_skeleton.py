@@ -249,7 +249,10 @@ def test_report_writes_the_evidence_pack_for_a_finished_run(
     code = main(["report", run.id], settings=settings)
 
     output = capsys.readouterr().out
+    html_path = evidence_path.parent / "evidence.html"
     assert code == 0
     assert str(evidence_path) in output
+    assert str(html_path) in output
     assert evidence_path.is_file()
     assert json.loads(evidence_path.read_text(encoding="utf-8"))["result"] == "verified"
+    assert "invoice-filed" in html_path.read_text(encoding="utf-8")

@@ -43,7 +43,7 @@ from company_operator.llm.meter import CostMeter
 
 if TYPE_CHECKING:
     from company_operator.context.task_pack import TaskPack
-    from company_operator.runs.models import Run
+    from company_operator.runs.models import ObservationRecord, Run
     from company_operator.runs.store import RunStore
     from company_operator.tools.registry import ToolRegistry
 
@@ -57,10 +57,17 @@ Rules:
 - Read each observation. If a call failed, adapt: try another tool or another
   argument.
 - Never repeat a call whose side effect already succeeded.
+- Approval gates are automatic: when you call a tool the policy gates, the Run
+  parks for a human decision and resumes with their answer. Call the gated tool
+  to request approval; never try to wait for or collect the decision yourself,
+  and never record, write, or invent one.
 - When the Step's done criterion is met, reply with a short summary and no tool
   call. That finishes the Step and moves to the next one.
 - If the Step cannot be finished, say so plainly in your summary.
 """
+
+
+MAX_OBSERVATION_DATA_CHARS = 4000
 
 
 class BudgetExceeded(RuntimeError):
@@ -540,23 +547,50 @@ class _Executor:
             f"Done criterion: {step.done_criterion}",
             f"Allowed tools: {', '.join(step.allowed_tools)}",
         ]
-        history = [
-            observation
-            for observation in self.store.list_observations(self.run_id)
-            if observation.step_position == position
+        observations = self.store.list_observations(self.run_id)
+        earlier = [
+            item
+            for item in observations
+            if item.step_position is not None and item.step_position < position
         ]
+        history = [item for item in observations if item.step_position == position]
+        if earlier:
+            lines.append(
+                "Results from earlier Steps (use these facts; do not repeat a "
+                "completed side effect):"
+            )
+            lines.extend(_observation_lines(earlier))
         if history:
             lines.append("Observations already made for this Step:")
-            lines.extend(
-                f"- {item.tool or '(model)'}: "
-                f"{'ok' if item.ok else item.error_kind or 'failed'} — {item.summary}"
-                for item in history
-            )
+            lines.extend(_observation_lines(history))
             lines.append("Do not repeat a side effect listed as ok.")
         return [
             {"role": "system", "content": EXECUTE_SYSTEM_PROMPT},
             {"role": "user", "content": "\n".join(lines)},
         ]
+
+
+def _observation_lines(observations: list[ObservationRecord]) -> list[str]:
+    lines: list[str] = []
+    for item in observations:
+        outcome = "ok" if item.ok else item.error_kind or "failed"
+        label = item.tool or "(model)"
+        if item.step_position is not None:
+            label = f"Step {item.step_position + 1} {label}"
+        lines.append(f"- {label} [{outcome}]: {item.summary}")
+        data = _data_snippet(item.data)
+        if data:
+            lines.append(f"  data: {data}")
+    return lines
+
+
+def _data_snippet(data: dict[str, Any]) -> str:
+    if not data:
+        return ""
+    text = json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+    if len(text) > MAX_OBSERVATION_DATA_CHARS:
+        return text[:MAX_OBSERVATION_DATA_CHARS] + " ... (truncated)"
+    return text
 
 
 def _assistant_message(turn: AssistantTurn, call: ToolCall) -> Message:

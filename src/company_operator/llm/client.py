@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 from hashlib import sha256
 from typing import Any, Literal, Protocol
 
@@ -11,6 +13,15 @@ from company_operator.config import ModelRole, Settings
 
 Message = dict[str, Any]
 ToolSpec = dict[str, Any]
+
+# OpenAI-compatible endpoints reject function names outside this pattern, so
+# dotted engine names (mail.list) are translated at the wire boundary.
+WIRE_NAME_PATTERN = re.compile(r"[^a-zA-Z0-9_-]")
+
+# Transport errors and busy gateways are retried; a bad request is not.
+REQUEST_ATTEMPTS = 3
+RETRY_BACKOFF_S = 1.0
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 class ToolCall(BaseModel):
@@ -38,6 +49,10 @@ class AssistantTurn(BaseModel):
 
 class ReplayMissError(RuntimeError):
     """Raised when replay mode finds no fixture for a request."""
+
+
+class LLMRequestError(RuntimeError):
+    """A non-2xx reply from the provider, carrying its error body."""
 
 
 class LLMClient(Protocol):
@@ -97,6 +112,53 @@ def _parse_turn(model: str, data: dict[str, Any]) -> AssistantTurn:
     )
 
 
+def _wire_name(name: str) -> str:
+    """A function name the provider accepts, derived from an engine tool name."""
+    return WIRE_NAME_PATTERN.sub("_", name)
+
+
+def _wire_tools(tools: list[ToolSpec]) -> tuple[list[ToolSpec], dict[str, str]]:
+    """Copy tool specs with provider-safe names, plus the mapping back."""
+    wire: list[ToolSpec] = []
+    originals: dict[str, str] = {}
+    for spec in tools:
+        function = spec.get("function") or {}
+        name = function.get("name")
+        if isinstance(name, str):
+            safe = _wire_name(name)
+            if safe != name:
+                originals.setdefault(safe, name)
+                spec = {**spec, "function": {**function, "name": safe}}
+        wire.append(spec)
+    return wire, originals
+
+
+def _wire_message(message: Message) -> Message:
+    """Copy a message, renaming any tool call to its provider-safe name."""
+    tool_calls = message.get("tool_calls")
+    if not tool_calls:
+        return message
+    wire_calls = []
+    for call in tool_calls:
+        function = call.get("function") or {}
+        name = function.get("name")
+        if isinstance(name, str):
+            safe = _wire_name(name)
+            if safe != name:
+                call = {**call, "function": {**function, "name": safe}}
+        wire_calls.append(call)
+    return {**message, "tool_calls": wire_calls}
+
+
+def _provider_error(response: httpx.Response) -> LLMRequestError:
+    detail = response.text.strip()
+    if len(detail) > 500:
+        detail = detail[:500] + "..."
+    return LLMRequestError(
+        f"{response.status_code} from {response.request.url}: {detail}"
+    )
+
+
 class LiveClient:
     """Chat-completions client for any OpenAI-compatible endpoint."""
 
@@ -128,15 +190,38 @@ class LiveClient:
         response_format: dict[str, Any] | None = None,
     ) -> AssistantTurn:
         model = self._settings.model_for(model_role)
-        payload: dict[str, Any] = {"model": model, "messages": messages}
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [_wire_message(message) for message in messages],
+        }
+        originals: dict[str, str] = {}
         if tools:
-            payload["tools"] = tools
+            payload["tools"], originals = _wire_tools(tools)
             payload["tool_choice"] = "auto"
         if response_format:
             payload["response_format"] = response_format
-        response = self._client.post("/chat/completions", json=payload)
-        response.raise_for_status()
-        return _parse_turn(model, response.json())
+        response = self._post(payload)
+        if response.is_error:
+            raise _provider_error(response)
+        turn = _parse_turn(model, response.json())
+        for call in turn.tool_calls:
+            call.name = originals.get(call.name, call.name)
+        return turn
+
+    def _post(self, payload: dict[str, Any]) -> httpx.Response:
+        """POST with bounded retries for transient transport and gateway failures."""
+        for attempt in range(REQUEST_ATTEMPTS):
+            last = attempt == REQUEST_ATTEMPTS - 1
+            try:
+                response = self._client.post("/chat/completions", json=payload)
+            except httpx.TransportError:
+                if last:
+                    raise
+            else:
+                if response.status_code not in RETRYABLE_STATUS or last:
+                    return response
+            time.sleep(RETRY_BACKOFF_S * (2**attempt))
+        raise AssertionError("unreachable: the retry loop always returns or raises")
 
 
 class ReplayClient:

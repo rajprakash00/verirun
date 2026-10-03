@@ -31,6 +31,10 @@ Rules:
 - "allowed_tools" may only contain tool names from the Task Pack allowlist. Use
   the smallest set of tools that can finish the Step.
 - The plan must cover every success criterion in the Work Order and follow the SOP.
+- Approval gates are engine mechanics, not Steps: plan the gated action itself,
+  for example scheduling an over-limit payment. Calling it parks the Run for a
+  human decision automatically, and the Run resumes with the answer. Never plan
+  a Step whose work is waiting for, collecting, or recording a human decision.
 - "id" is a short unique slug, for example "step-1", numbered in order.
 - "done_criterion" is a checkable statement that says when the Step is finished.
 - Reply with JSON only: no prose, no markdown.

@@ -281,6 +281,46 @@ def test_happy_path_executes_every_step_and_hands_off_to_verify(tmp_path: Path) 
     assert store.get_checkpoint("RUN-0001", "step-2") is not None
 
 
+def test_later_steps_see_earlier_observations_with_their_data(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "operator.db")
+    plan = {
+        "steps": [
+            {
+                "id": "step-1",
+                "goal": "List the working folder",
+                "allowed_tools": ["files.list"],
+                "done_criterion": "the folder has been listed",
+            },
+            {
+                "id": "step-2",
+                "goal": "Read the invoice the previous Step saved",
+                "allowed_tools": ["files.read"],
+                "done_criterion": "the invoice has been read",
+            },
+        ]
+    }
+    seed_planned_run(store, plan)
+    root = tmp_path / "shared"
+    (root / "work").mkdir(parents=True)
+    (root / "work" / "invoice.txt").write_text("NW-2026-001", encoding="utf-8")
+    registry = ToolRegistry(build_file_tools(root), allowlist=["files.list", "files.read"])
+    client = ScriptedClient(
+        [
+            tool_turn("files.list", {"path": "work"}),
+            text_turn("Listed the working folder."),
+            tool_turn("files.read", {"path": "work/invoice.txt"}),
+            text_turn("Read the invoice."),
+        ]
+    )
+
+    run = execute_run("RUN-0001", client, store, registry)
+
+    assert run.state is RunState.VERIFYING
+    step_two_context = client.calls[2]["messages"][1]["content"]
+    assert "Results from earlier Steps" in step_two_context
+    assert "invoice.txt" in step_two_context
+
+
 def test_a_crashed_run_resumes_without_repeating_a_completed_side_effect(
     tmp_path: Path,
 ) -> None:
