@@ -239,6 +239,30 @@ the Company Context change.
 - The static `evidence.html` is a snapshot of a Run directory; screenshots are
   inlined as recorded.
 
+## What I'd build next
+
+With two more weeks, in priority order:
+
+1. **An eval harness.** Run the seeded scenarios end to end in replay mode on
+   every change, and score task success, recovery rate, human interventions per
+   Run, steps, and cost. The tests lock outcomes today, but no aggregate quality
+   signal guards prompt, model, or Task Pack edits.
+2. **Browser re-grounding.** When a click or type fails because the UI changed,
+   take a fresh snapshot and re-resolve the target by role and name. Add a
+   vision fallback for canvas or image-only widgets, and journal the working
+   locator so retries stay idempotent.
+3. **A company-memory write path.** After each verified Run, propose a
+   structured precedent (vendor quirks, working selectors, mismatch
+   resolutions). A human approves it. Resolve and Plan then retrieve the top few
+   precedents per Request. Memory stays static until this path exists.
+4. **A trace-to-Task-Pack compiler.** Draft a Task Pack from a verified Run's
+   journal: goal template, tool allowlist, approval rules, verification
+   contract. A human reviews the draft. This lowers a new kind of work from a
+   hand-written pack and check to a review.
+5. **Production hardening, after the above.** A Postgres-backed queue with
+   scheduling, authentication and tenancy, a secrets vault, per-tool capability
+   scopes, and OpenTelemetry audit export.
+
 ## Repository layout
 
 ```
