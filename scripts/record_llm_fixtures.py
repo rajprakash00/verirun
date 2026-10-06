@@ -3,7 +3,7 @@
 Usage: uv run python scripts/record_llm_fixtures.py
 
 Reads the gateway settings from .env. Writes one fixture per LLM call into
-OPERATOR_FIXTURE_DIR (default tests/fixtures/llm). Re-run whenever the company
+VERIRUN_FIXTURE_DIR (default tests/fixtures/llm). Re-run whenever the company
 context, the Task Pack, or the prompts change.
 """
 
@@ -13,12 +13,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from company_operator.config import Settings
-from company_operator.context.company import load_company_context
-from company_operator.context.task_pack import load_task_pack
-from company_operator.engine.orchestrator import start_run
-from company_operator.llm.client import build_client
-from company_operator.runs.store import RunStore
+from verirun.config import Settings
+from verirun.context.company import load_company_context
+from verirun.context.task_pack import load_task_pack
+from verirun.engine.orchestrator import start_run
+from verirun.llm.client import build_client
+from verirun.runs.store import RunStore
 
 REQUESTS = (
     ("Process the invoices in the AP mailbox", "invoice-processing"),

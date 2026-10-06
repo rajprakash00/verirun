@@ -6,7 +6,7 @@ Task: #13 — Evidence HTML and project documentation
 
 ## Context
 
-Operator must complete real work with guarantees that general-purpose agent
+Verirun must complete real work with guarantees that general-purpose agent
 frameworks treat as application code:
 
 - a fixed lifecycle — Resolve, Plan, Approve, Execute, Observe, Verify, Report —
@@ -29,7 +29,7 @@ product explicitly does not use: there is one orchestrator and one Verifier.
 ## Decision
 
 Build the engine as a small custom Python state machine
-(`src/company_operator/engine/`), on top of an injected LLM client and a uniform
+(`src/verirun/engine/`), on top of an injected LLM client and a uniform
 tool interface.
 
 - The lifecycle is an explicit enum with guarded transitions; every phase writes

@@ -1,7 +1,7 @@
 id: spend-limits
 title: Spend limits
 description: >-
-  Limits how much money the Operator may commit without a human decision.
+  Limits how much money Verirun may commit without a human decision.
   Amounts are in US dollars unless a rule says otherwise.
 rules:
   - id: approval-threshold

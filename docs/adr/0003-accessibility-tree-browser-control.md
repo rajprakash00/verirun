@@ -6,7 +6,7 @@ Task: #13 — Evidence HTML and project documentation
 
 ## Context
 
-The browser is a real tool, not a mock: the Operator opens web apps, reads
+The browser is a real tool, not a mock: Verirun opens web apps, reads
 pages, fills forms, and captures screenshots. Driving a page requires deciding
 how the model perceives it and how it addresses elements. The candidates:
 
@@ -26,7 +26,7 @@ standard labeled controls, exactly what the accessibility tree represents.
 ## Decision
 
 Control the browser through the accessibility tree with deterministic refs
-(`src/company_operator/tools/browser.py`).
+(`src/verirun/tools/browser.py`).
 
 - `browser.snapshot` walks the DOM for interactive roles and labeled text,
   assigns each interactive element a short ref (`e1`, `e2`, ...) stored as

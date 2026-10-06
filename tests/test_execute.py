@@ -13,19 +13,19 @@ from typing import Any, ClassVar
 
 import pytest
 
-from company_operator.config import ModelPrice
-from company_operator.context.company import load_company_context
-from company_operator.context.policies import Policy, PolicyRule, PolicySet
-from company_operator.context.task_pack import load_task_pack
-from company_operator.engine.execute import action_key, execute_run
-from company_operator.engine.models import Observation, Plan
-from company_operator.engine.orchestrator import start_run
-from company_operator.engine.states import RunState
-from company_operator.llm.client import Usage
-from company_operator.runs.store import RunStore
-from company_operator.tools import PolicyGate, Tool, ToolError, ToolRegistry, build_file_tools
-from company_operator.tools.browser import ClickTool, SelectTool, SnapshotTool, TypeTool
 from tests.support import ROOT, WORK_ORDER, ScriptedClient, text_turn, tool_turn
+from verirun.config import ModelPrice
+from verirun.context.company import load_company_context
+from verirun.context.policies import Policy, PolicyRule, PolicySet
+from verirun.context.task_pack import load_task_pack
+from verirun.engine.execute import action_key, execute_run
+from verirun.engine.models import Observation, Plan
+from verirun.engine.orchestrator import start_run
+from verirun.engine.states import RunState
+from verirun.llm.client import Usage
+from verirun.runs.store import RunStore
+from verirun.tools import PolicyGate, Tool, ToolError, ToolRegistry, build_file_tools
+from verirun.tools.browser import ClickTool, SelectTool, SnapshotTool, TypeTool
 
 NO_ARGUMENTS: dict[str, Any] = {
     "type": "object",
@@ -245,7 +245,7 @@ def two_step_invoice_plan() -> dict[str, Any]:
 
 
 def test_happy_path_executes_every_step_and_hands_off_to_verify(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     start_planned_run(store, EXECUTE_PLAN)
     root = tmp_path / "shared"
     registry = ToolRegistry(
@@ -282,7 +282,7 @@ def test_happy_path_executes_every_step_and_hands_off_to_verify(tmp_path: Path) 
 
 
 def test_later_steps_see_earlier_observations_with_their_data(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     plan = {
         "steps": [
             {
@@ -324,7 +324,7 @@ def test_later_steps_see_earlier_observations_with_their_data(tmp_path: Path) ->
 def test_a_crashed_run_resumes_without_repeating_a_completed_side_effect(
     tmp_path: Path,
 ) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     start_planned_run(store, two_step_invoice_plan())
     tool = InvoiceTool()
     registry = ToolRegistry([tool], allowlist=["erp.file_invoice"])
@@ -365,7 +365,7 @@ def test_a_crashed_run_resumes_without_repeating_a_completed_side_effect(
 
 
 def test_completed_side_effects_are_journaled_with_their_result(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     start_planned_run(store, two_step_invoice_plan())
     tool = InvoiceTool()
     registry = ToolRegistry([tool], allowlist=["erp.file_invoice"])
@@ -390,7 +390,7 @@ def test_completed_side_effects_are_journaled_with_their_result(tmp_path: Path) 
 
 
 def test_a_run_over_the_step_limit_stops_with_a_clear_reason(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     plan = {
         "steps": [
             {
@@ -418,7 +418,7 @@ def test_a_run_over_the_step_limit_stops_with_a_clear_reason(tmp_path: Path) -> 
 
 
 def test_a_run_over_the_cost_limit_stops_before_a_side_effect(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     start_planned_run(store, two_step_invoice_plan())
     tool = InvoiceTool()
     registry = ToolRegistry([tool], allowlist=["erp.file_invoice"])
@@ -446,7 +446,7 @@ def test_a_run_over_the_cost_limit_stops_before_a_side_effect(tmp_path: Path) ->
 
 
 def test_a_closing_turn_over_the_cost_limit_still_stops_the_run(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     plan = {
         "steps": [
             {
@@ -478,7 +478,7 @@ def test_a_closing_turn_over_the_cost_limit_still_stops_the_run(tmp_path: Path) 
 
 
 def test_resume_skips_steps_recorded_in_the_latest_checkpoint(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_planned_run(store, two_step_invoice_plan())
     store.save_checkpoint(
         "RUN-0001",
@@ -501,7 +501,7 @@ def test_resume_skips_steps_recorded_in_the_latest_checkpoint(tmp_path: Path) ->
 
 
 def test_every_failure_class_is_recorded_on_its_observation(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     plan = {
         "steps": [
             {
@@ -551,7 +551,7 @@ def test_every_failure_class_is_recorded_on_its_observation(tmp_path: Path) -> N
 
 
 def test_executing_a_finished_run_is_a_no_op(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     start_planned_run(store, two_step_invoice_plan())
     tool = InvoiceTool()
     registry = ToolRegistry([tool], allowlist=["erp.file_invoice"])
@@ -606,7 +606,7 @@ def test_mutating_tools_are_marked_as_side_effects(tmp_path: Path) -> None:
 
 
 def test_a_transient_failure_is_retried_automatically_then_succeeds(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_planned_run(store, one_step_plan("test.flaky_once"))
     tool = FlakyOnceTool()
     registry = ToolRegistry([tool], allowlist=["test.flaky_once"])
@@ -626,7 +626,7 @@ def test_a_transient_failure_is_retried_automatically_then_succeeds(tmp_path: Pa
 
 
 def test_the_model_can_escalate_with_a_question(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_planned_run(store, one_step_plan("test.ping"))
     registry = ToolRegistry([PingTool()], allowlist=["test.ping"])
     client = ScriptedClient(
@@ -654,7 +654,7 @@ def test_the_model_can_escalate_with_a_question(tmp_path: Path) -> None:
 
 
 def test_repeated_failures_are_bounded_when_replanning_is_unavailable(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_planned_run(store, one_step_plan("test.always_fails"))
     tool = AlwaysFailsTool()
     registry = ToolRegistry([tool], allowlist=["test.always_fails"])
@@ -671,7 +671,7 @@ def test_repeated_failures_are_bounded_when_replanning_is_unavailable(tmp_path: 
 
 
 def test_persistent_failures_replan_once_with_context_then_escalate(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     task_pack = load_task_pack(ROOT / "tasks" / "invoice-processing.yaml")
     context = load_company_context(ROOT / "company")
     replan = one_step_plan("files.write")
@@ -716,7 +716,7 @@ def test_persistent_failures_replan_once_with_context_then_escalate(tmp_path: Pa
 
 
 def test_resuming_after_a_replan_reexecutes_the_replanned_step(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     task_pack = load_task_pack(ROOT / "tasks" / "invoice-processing.yaml")
     context = load_company_context(ROOT / "company")
     replan = one_step_plan("files.write")
@@ -773,7 +773,7 @@ def test_resuming_after_a_replan_reexecutes_the_replanned_step(tmp_path: Path) -
 
 
 def test_replans_are_bounded_across_resumes(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     task_pack = load_task_pack(ROOT / "tasks" / "invoice-processing.yaml")
     context = load_company_context(ROOT / "company")
     replan = one_step_plan("files.write")
@@ -874,7 +874,7 @@ def gated_registry(tool: Tool) -> ToolRegistry:
 
 
 def test_a_gated_irreversible_action_parks_without_running(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_planned_run(store, one_step_plan("test.irreversible"))
     tool = IrreversibleGatedTool()
     client = ScriptedClient([tool_turn("test.irreversible")])
@@ -892,7 +892,7 @@ def test_a_gated_irreversible_action_parks_without_running(tmp_path: Path) -> No
 def test_a_gated_reversible_action_escalates_instead_of_preparing_approval(
     tmp_path: Path,
 ) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_planned_run(store, one_step_plan("test.reversible"))
     tool = ReversibleGatedTool()
     client = ScriptedClient([tool_turn("test.reversible")])
@@ -907,7 +907,7 @@ def test_a_gated_reversible_action_escalates_instead_of_preparing_approval(
 
 
 def test_an_escalated_run_resumes_after_the_human_answers(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_planned_run(store, one_step_plan("test.ping"))
     registry = ToolRegistry([PingTool()], allowlist=["test.ping"])
     parked = execute_run(

@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 
-from company_operator.config import Settings
-from company_operator.llm.client import LiveClient, ReplayClient, ReplayMissError
+from verirun.config import Settings
+from verirun.llm.client import LiveClient, ReplayClient, ReplayMissError
 
 
 def _settings(tmp_path) -> Settings:

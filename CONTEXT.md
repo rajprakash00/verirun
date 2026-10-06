@@ -2,25 +2,25 @@
 
 Shared vocabulary for this project. A glossary only. No implementation details.
 
-**Operator** — the system that turns a company request into completed work. It understands, plans, executes, observes, adapts, verifies, and reports. We say "Operator", not "AI employee".
+**Verirun** — the system that turns a company request into completed work. It understands, plans, executes, observes, adapts, verifies, and reports. We say "Verirun", not "AI employee".
 
 **Request** — a short instruction from a person. A Request can be incomplete.
 
-**Work Order** — the Operator's written interpretation of a Request: assumptions, required steps, systems, policies, approval gates, and success criteria. Made before acting.
+**Work Order** — Verirun's written interpretation of a Request: assumptions, required steps, systems, policies, approval gates, and success criteria. Made before acting.
 
-**Company Context** — the knowledge needed to complete work: SOPs, policies, system registry, and precedents. The Operator reads it; it does not guess.
+**Company Context** — the knowledge needed to complete work: SOPs, policies, system registry, and precedents. Verirun reads it; it does not guess.
 
 **SOP** — Standard Operating Procedure. A written procedure for one kind of work.
 
 **Policy** — a rule that permits or limits an action.
 
-**Approval Gate** — a point where the Operator stops and waits for a human yes/no.
+**Approval Gate** — a point where Verirun stops and waits for a human yes/no.
 
 **Approval Request** — a prepared irreversible action waiting for a human yes/no. Approving submits it; rejecting aborts the Run with the reason.
 
-**Escalation** — asking a human for help when the Operator cannot continue safely.
+**Escalation** — asking a human for help when Verirun cannot continue safely.
 
-**Tool** — one function the Operator can call.
+**Tool** — one function Verirun can call.
 
 **Step** — one piece of work inside a plan.
 

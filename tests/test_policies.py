@@ -1,6 +1,6 @@
 import pytest
 
-from company_operator.context.policies import (
+from verirun.context.policies import (
     Policy,
     PolicyEvaluationError,
     PolicyRule,

@@ -1,6 +1,6 @@
 # Architecture (High-Level Design)
 
-Operator turns a short Request into completed work: it plans, executes with real tools,
+Verirun turns a short Request into completed work: it plans, executes with real tools,
 adapts on failure, stops for human approval, verifies against ground truth, and returns
 an Evidence Pack.
 
@@ -82,7 +82,7 @@ order. The per-run step and cost meters bound the worst case: no scenario loops.
 
 `company/` is committed knowledge: SOPs (Markdown), policies (YAML: spend limits,
 permitted/forbidden actions), a system registry (URLs, sandbox credentials), and
-precedents. The Work Order is the Operator's written interpretation of a Request and is
+precedents. The Work Order is Verirun's written interpretation of a Request and is
 shown in the dashboard before execution.
 
 ## 4. Task Packs
@@ -162,7 +162,7 @@ proxy-work/
 ├── tasks/                     # Task Packs (YAML)
 │   ├── invoice-processing.yaml
 │   └── vendor-onboarding.yaml
-├── src/company_operator/
+├── src/verirun/
 │   ├── engine/                # state machine, planner, executor, verifier
 │   ├── context/               # Company Context loader, Work Order
 │   ├── llm/                   # provider client, replay, cost meter

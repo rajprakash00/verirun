@@ -7,10 +7,10 @@ import re
 from contextlib import closing
 from pathlib import Path
 
-from company_operator.engine.states import RunState
-from company_operator.runs.store import RunStore
 from mocks.ledgerlite import db as ledgerlite
 from scripts import demo
+from verirun.engine.states import RunState
+from verirun.runs.store import RunStore
 
 
 def test_demo_runs_happy_failure_and_approval(
@@ -36,7 +36,7 @@ def test_demo_runs_happy_failure_and_approval(
     ids = dict(re.findall(r"\[(happy|transient|approval)\] (RUN-\S+):", output))
     assert set(ids) == {"happy", "transient", "approval"}
 
-    store = RunStore(runs_dir / "operator.db")
+    store = RunStore(runs_dir / "verirun.db")
     happy = store.get_run(ids["happy"])
     failure = store.get_run(ids["transient"])
     approval = store.get_run(ids["approval"])

@@ -6,7 +6,7 @@ Company tasks arrive as short requests that leave the required steps and context
 
 ## Solution
 
-Operator is a system that turns a short Request into completed work. For each Request it:
+Verirun is a system that turns a short Request into completed work. For each Request it:
 
 - reads the Company Context (SOPs, Policies, system registry, precedents) to discover the unstated steps;
 - writes a Work Order: assumptions, steps, systems, approval gates, and success criteria;
@@ -21,9 +21,9 @@ The prototype demonstrates two different tasks on one unchanged engine: invoice 
 ## User Stories
 
 1. As an operations manager, I want to give a one-line request, so that I do not have to spell out every step.
-2. As an operations manager, I want the Operator to write a Work Order before acting, so that I can see its assumptions and plan.
-3. As an operations manager, I want the Operator to read company SOPs and policies, so that work follows our procedures.
-4. As an operations manager, I want the Operator to name the systems and permissions it will use, so that I can judge the scope.
+2. As an operations manager, I want Verirun to write a Work Order before acting, so that I can see its assumptions and plan.
+3. As an operations manager, I want Verirun to read company SOPs and policies, so that work follows our procedures.
+4. As an operations manager, I want Verirun to name the systems and permissions it will use, so that I can judge the scope.
 5. As a finance operator, I want invoice emails fetched from the mailbox, so that I do not copy data by hand.
 6. As a finance operator, I want invoice data extracted from PDFs, so that entry is automatic.
 7. As a finance operator, I want text and scanned invoices both supported, so that paper is not a blocker.
@@ -31,16 +31,16 @@ The prototype demonstrates two different tasks on one unchanged engine: invoice 
 9. As a finance operator, I want duplicate invoices detected, so that we never pay twice.
 10. As a finance operator, I want invoices above the spend limit routed to a human, so that policy is respected.
 11. As a finance operator, I want to approve or reject pending actions in one place, so that I stay in control.
-12. As a finance operator, I want the Operator to prepare but never submit irreversible actions before approval.
+12. As a finance operator, I want Verirun to prepare but never submit irreversible actions before approval.
 13. As a finance operator, I want transient failures retried automatically, so that hiccups do not need my attention.
-14. As a finance operator, I want the Operator to escalate when it cannot proceed, so that I can help.
+14. As a finance operator, I want Verirun to escalate when it cannot proceed, so that I can help.
 15. As a finance operator, I want processed invoices archived with their source files, so that records stay tidy.
 16. As a finance operator, I want an Evidence Pack for every run, so that I can audit what happened.
 17. As a finance operator, I want verification against the ERP record, so that I know the work is actually done.
 18. As a procurement operator, I want new vendors onboarded from an email without manual entry, so that setup does not wait on me.
 19. As a procurement operator, I want duplicate vendors detected before creation, so that our master data stays clean.
 20. As a procurement operator, I want required tax documents enforced, so that compliance is complete.
-21. As a compliance officer, I want a Policy denial to stop an action, so that the Operator cannot exceed its permissions.
+21. As a compliance officer, I want a Policy denial to stop an action, so that Verirun cannot exceed its permissions.
 22. As a compliance officer, I want every action logged with its policy basis, so that decisions are explainable.
 23. As an engineer, I want each kind of work declared as a Task Pack, so that adding a task does not change the engine.
 24. As an engineer, I want tools behind a uniform interface, so that new tools do not change the engine.
@@ -59,7 +59,7 @@ The prototype demonstrates two different tasks on one unchanged engine: invoice 
 
 **Verifier.** Reads the verification contract from the Task Pack and checks real state via the internal system API/database and the filesystem. It does not read the executor's messages and does not trust the screen. It returns pass/fail per criterion plus evidence references. Screenshots are supporting display evidence only.
 
-**Company Context.** A committed pack: SOPs in Markdown, policies in YAML (spend limits, permitted and forbidden actions), a system registry (URLs and sandbox credentials), and precedents. From a short Request, the Operator produces a Work Order that resolves ambiguity from this context or escalates the gap.
+**Company Context.** A committed pack: SOPs in Markdown, policies in YAML (spend limits, permitted and forbidden actions), a system registry (URLs and sandbox credentials), and precedents. From a short Request, Verirun produces a Work Order that resolves ambiguity from this context or escalates the gap.
 
 **Task Packs.** Declarative YAML per kind of work: goal template, SOP reference, tool allowlist, policy references, approval gate rules, and a verification contract. The engine is task-agnostic; changing the Task Pack changes the task.
 
@@ -67,7 +67,7 @@ The prototype demonstrates two different tasks on one unchanged engine: invoice 
 
 **Mock Suite.** Two small FastAPI services plus local state: MailDesk (webmail with invoice emails and attachments) and LedgerLite (vendors, purchase orders, goods receipts, invoices, payments, approvals). SQLite holds state; a shared file tree holds documents. Seed data scripts create the scenarios.
 
-**Human-in-the-loop.** Approval Gates are declared per Task Pack and enforced by the engine. The Operator may prepare an irreversible action, but submission waits for a human decision in the dashboard approval queue. Timeouts never auto-approve; they abort or remain pending. Ambiguity escalates.
+**Human-in-the-loop.** Approval Gates are declared per Task Pack and enforced by the engine. Verirun may prepare an irreversible action, but submission waits for a human decision in the dashboard approval queue. Timeouts never auto-approve; they abort or remain pending. Ambiguity escalates.
 
 **State and reliability.** A run store (SQLite) keeps run state, checkpoints, an action journal with idempotency keys, and observations. Retries are safely repeatable. Per-run step and cost meters stop runaway runs. Failure handling is scenario-driven, not random.
 
@@ -84,7 +84,7 @@ The prototype demonstrates two different tasks on one unchanged engine: invoice 
 Testing is deliberately lean. The goal is to lock critical outcomes, not to maximize coverage.
 
 - **Replay brain.** LLM calls are recorded once and replayed in tests, so tests are deterministic, free, and offline.
-- **End-to-end outcome tests** drive the whole Operator in-process against the real Mock Suite and assert on: the verified result, the Mock Suite ground truth, the Evidence Pack, and the final run state. Scenarios covered this way: happy path, duplicate invoice, amount mismatch, over-limit approval, transient-failure retry.
+- **End-to-end outcome tests** drive the whole Verirun in-process against the real Mock Suite and assert on: the verified result, the Mock Suite ground truth, the Evidence Pack, and the final run state. Scenarios covered this way: happy path, duplicate invoice, amount mismatch, over-limit approval, transient-failure retry.
 - **Human-gate tests** drive the dashboard HTTP API: a run pauses at an Approval Gate, an approve or reject decision resumes it, and timeout does not auto-approve.
 - **Two small unit seams**: Task Pack validation and Policy evaluation, as table-driven tests.
 - **Mock Suite smoke test** only: the mocks are test infrastructure and ground truth, not the product.

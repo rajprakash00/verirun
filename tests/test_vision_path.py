@@ -12,9 +12,6 @@ import json
 from contextlib import closing
 from pathlib import Path
 
-from company_operator.cli import main
-from company_operator.engine.states import RunState
-from company_operator.runs.store import RunStore
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import (
     SCAN_PATH,
@@ -25,6 +22,9 @@ from tests.support import (
     tool_turn,
     vision_turn,
 )
+from verirun.cli import main
+from verirun.engine.states import RunState
+from verirun.runs.store import RunStore
 
 FILED_INVOICE_ID = "INV-3003"
 

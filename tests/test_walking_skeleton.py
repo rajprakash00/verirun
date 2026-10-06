@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from company_operator.cli import main
-from company_operator.config import Settings
-from company_operator.engine.states import RunState
-from company_operator.runs.store import RunStore
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import ROOT, WORK_ORDER, ScriptedClient, text_turn, tool_turn
+from verirun.cli import main
+from verirun.config import Settings
+from verirun.engine.states import RunState
+from verirun.runs.store import RunStore
 
 FILED_INVOICE_ID = "INV-3003"
 
@@ -54,7 +54,7 @@ def skeleton_settings(tmp_path: Path, ledgerlite_db: Path, maildesk_state) -> Se
         _env_file=None,
         company_dir=ROOT / "company",
         tasks_dir=ROOT / "tasks",
-        run_db=tmp_path / "runs" / "operator.db",
+        run_db=tmp_path / "runs" / "verirun.db",
         shared_dir=maildesk_state.shared_root,
         mail_db=maildesk_state.db_path,
         erp_db=ledgerlite_db,

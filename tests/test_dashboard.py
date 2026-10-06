@@ -14,13 +14,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from company_operator.context.company import load_company_context
-from company_operator.context.task_pack import load_task_pack
-from company_operator.engine.orchestrator import run_task
-from company_operator.engine.states import RunState
-from company_operator.runs.store import RunStore
-from company_operator.runtime import build_registry
-from company_operator.web import create_app
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import (
     WORK_ORDER,
@@ -29,6 +22,13 @@ from tests.support import (
     run_settings,
     tool_turn,
 )
+from verirun.context.company import load_company_context
+from verirun.context.task_pack import load_task_pack
+from verirun.engine.orchestrator import run_task
+from verirun.engine.states import RunState
+from verirun.runs.store import RunStore
+from verirun.runtime import build_registry
+from verirun.web import create_app
 
 ESCALATED_PLAN = {
     "steps": [
@@ -218,7 +218,7 @@ def test_a_pending_approval_never_auto_approves_with_time(
     client = TestClient(create_app(settings))
 
     moved = datetime.now(UTC) + timedelta(days=3)
-    monkeypatch.setattr("company_operator.runs.store._now", lambda: moved)
+    monkeypatch.setattr("verirun.runs.store._now", lambda: moved)
     client.get("/approvals")
     client.get(f"/runs/{run_id}")
 

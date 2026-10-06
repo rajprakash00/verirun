@@ -49,5 +49,5 @@ validated invoices in LedgerLite and scheduled payments.
 - Verify against LedgerLite and the filesystem: the invoice record exists with
   the right amount and status, and the source document is archived.
 - A run is complete only when every success criterion passes. Otherwise report
-  the exception and escalate to the AP owner; the Operator dashboard delivers
+  the exception and escalate to the AP owner; the Verirun dashboard delivers
   the question to them and resumes the Run with their answer.

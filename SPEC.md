@@ -2,7 +2,7 @@
 
 ## Problem Statement
 
-Verirun (currently named "Operator") is a working prototype: one unchanged engine turns a short Request into completed work against a self-contained Mock Suite, with a Work Order, Approval Gates, an independent Verifier, and an Evidence Pack.
+Verirun is a working prototype: one unchanged engine turns a short Request into completed work against a self-contained Mock Suite, with a Work Order, Approval Gates, an independent Verifier, and an Evidence Pack.
 
 It is not yet a product:
 
@@ -33,7 +33,7 @@ The Mock Suite stays the demo ground truth. The engine, the Task Packs, and the 
 3. As a new user, I want accurate package metadata (name, license, readme, URLs, classifiers), so that installers and indexes describe the project correctly.
 4. As a reader, I want the glossary, README, SOPs, policies, and architecture to use Verirun as the system name, so that the vocabulary stays consistent.
 5. As a reviewer, I want every documented Tool, state, and feature to exist in the code, so that I can trust the documentation.
-6. As a compliance officer, I want policies to reference only actions the Operator can actually attempt, so that policy evaluation is meaningful.
+6. As a compliance officer, I want policies to reference only actions Verirun can actually attempt, so that policy evaluation is meaningful.
 7. As a reviewer, I want the architecture document to describe the state machine as it is implemented, so that the design document is accurate.
 8. As an operator, I want a live `run` to execute `browser.*` Steps against the Mock Suite, so that the live path matches the Task Pack allowlists.
 9. As an operator, I want the dashboard to register the same Tools as the CLI, so that an approval-resumed Run behaves like a fresh Run.

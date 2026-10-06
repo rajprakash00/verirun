@@ -9,11 +9,11 @@ from typing import Any, ClassVar
 
 import pytest
 
-from company_operator.context.company import load_company_context
-from company_operator.engine.models import Observation
-from company_operator.tools import PolicyGate, Tool, ToolError, ToolRegistry
 from mocks.ledgerlite import db
 from tests.support import ROOT
+from verirun.context.company import load_company_context
+from verirun.engine.models import Observation
+from verirun.tools import PolicyGate, Tool, ToolError, ToolRegistry
 
 
 class RecordingTool(Tool):
@@ -185,7 +185,7 @@ def test_specs_only_include_allowlisted_registered_tools() -> None:
 
 
 def test_registry_can_be_built_from_a_task_pack() -> None:
-    from company_operator.context.task_pack import load_task_pack
+    from verirun.context.task_pack import load_task_pack
 
     task_pack = load_task_pack(ROOT / "tasks" / "invoice-processing.yaml")
     registry = ToolRegistry.from_task_pack(

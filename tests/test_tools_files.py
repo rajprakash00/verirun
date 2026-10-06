@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fpdf import FPDF
 
-from company_operator.tools import Tool, build_file_tools
+from verirun.tools import Tool, build_file_tools
 
 
 @pytest.fixture

@@ -2,15 +2,15 @@ import json
 
 import pytest
 
-from company_operator.context.company import load_company_context
-from company_operator.context.task_pack import TaskPackError, load_task_pack
-from company_operator.engine.orchestrator import start_run
-from company_operator.engine.plan import plan_run
-from company_operator.engine.resolve import resolve
-from company_operator.engine.states import RunState
-from company_operator.engine.structured import StructuredOutputError
-from company_operator.runs.store import RunStore
 from tests.support import PLAN, ROOT, WORK_ORDER, ScriptedClient
+from verirun.context.company import load_company_context
+from verirun.context.task_pack import TaskPackError, load_task_pack
+from verirun.engine.orchestrator import start_run
+from verirun.engine.plan import plan_run
+from verirun.engine.resolve import resolve
+from verirun.engine.states import RunState
+from verirun.engine.structured import StructuredOutputError
+from verirun.runs.store import RunStore
 
 
 @pytest.fixture

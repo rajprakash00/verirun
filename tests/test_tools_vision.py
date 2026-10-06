@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from company_operator.tools.vision import ExtractInvoiceTool
 from tests.support import SCAN_PATH, ScriptedClient, vision_fields
+from verirun.tools.vision import ExtractInvoiceTool
 
 SCAN = SCAN_PATH
 TEXT_INVOICE = "documents/invoices/NW-2026-001.pdf"

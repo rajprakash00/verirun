@@ -4,8 +4,8 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from company_operator.config import Settings
-from company_operator.llm.client import LiveClient, LLMRequestError
+from verirun.config import Settings
+from verirun.llm.client import LiveClient, LLMRequestError
 
 
 def test_live_client_returns_tool_call() -> None:
@@ -158,7 +158,7 @@ def test_live_client_reports_the_provider_error_body() -> None:
 def _retrying_client(
     monkeypatch: pytest.MonkeyPatch, handler: Callable[[httpx.Request], httpx.Response]
 ) -> LiveClient:
-    monkeypatch.setattr("company_operator.llm.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("verirun.llm.client.time.sleep", lambda _seconds: None)
     settings = Settings(
         _env_file=None,
         api_key="test-key",

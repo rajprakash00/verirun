@@ -1,7 +1,7 @@
 id: action-rules
 title: Permitted and forbidden actions
 description: >-
-  What the Operator may do, what it must never do, and what always needs a
+  What Verirun may do, what it must never do, and what always needs a
   human yes.
 rules:
   - id: no-payment-to-blocked-vendor

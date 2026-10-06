@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from company_operator.engine.models import Observation
-from company_operator.tools import BrowserSession, ToolRegistry, build_browser_tools
 from mocks.ledgerlite import db
+from verirun.engine.models import Observation
+from verirun.tools import BrowserSession, ToolRegistry, build_browser_tools
 
 BROWSER_TOOLS = [
     "browser.navigate",

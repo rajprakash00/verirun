@@ -1,6 +1,6 @@
 import pytest
 
-from company_operator.engine.states import (
+from verirun.engine.states import (
     InvalidTransitionError,
     RunState,
     can_transition,

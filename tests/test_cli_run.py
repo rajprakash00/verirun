@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from company_operator.cli import main
-from company_operator.config import Settings
-from company_operator.context.company import load_company_context
-from company_operator.context.task_pack import load_task_pack
-from company_operator.engine.orchestrator import start_run
-from company_operator.engine.states import RunState
-from company_operator.runs.store import RunStore
 from tests.support import PLAN, ROOT, WORK_ORDER, ScriptedClient
+from verirun.cli import main
+from verirun.config import Settings
+from verirun.context.company import load_company_context
+from verirun.context.task_pack import load_task_pack
+from verirun.engine.orchestrator import start_run
+from verirun.engine.states import RunState
+from verirun.runs.store import RunStore
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -22,7 +22,7 @@ def make_settings(tmp_path: Path) -> Settings:
         _env_file=None,
         company_dir=ROOT / "company",
         tasks_dir=tasks_dir,
-        run_db=tmp_path / "runs" / "operator.db",
+        run_db=tmp_path / "runs" / "verirun.db",
     )
 
 

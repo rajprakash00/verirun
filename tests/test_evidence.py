@@ -5,18 +5,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from company_operator.context.models import WorkOrder
-from company_operator.engine.models import Observation, Plan
-from company_operator.engine.states import RunState
-from company_operator.runs.evidence import build_evidence, write_evidence
-from company_operator.runs.store import RunStore
 from tests.support import WORK_ORDER, plan_json, seed_completed_run
+from verirun.context.models import WorkOrder
+from verirun.engine.models import Observation, Plan
+from verirun.engine.states import RunState
+from verirun.runs.evidence import build_evidence, write_evidence
+from verirun.runs.store import RunStore
 
 PLAN = plan_json()
 
 
 def test_build_evidence_carries_the_whole_run(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_completed_run(store)
     run = store.get_run("RUN-0001")
 
@@ -42,7 +42,7 @@ def test_build_evidence_carries_the_whole_run(tmp_path: Path) -> None:
 
 
 def test_write_evidence_lands_in_the_run_directory(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_completed_run(store)
     run = store.get_run("RUN-0001")
 
@@ -58,7 +58,7 @@ def test_write_evidence_lands_in_the_run_directory(tmp_path: Path) -> None:
 
 
 def test_evidence_for_an_unverified_run_reports_its_state(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     store.create_run("Process the invoices", "invoice-processing", run_id="RUN-0002")
     run = store.get_run("RUN-0002")
 
@@ -73,7 +73,7 @@ def test_evidence_for_an_unverified_run_reports_its_state(tmp_path: Path) -> Non
 
 
 def test_evidence_carries_extracted_fields_and_confidences(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_completed_run(store)
     store.add_observation(
         "RUN-0001",
@@ -132,7 +132,7 @@ def test_evidence_carries_extracted_fields_and_confidences(tmp_path: Path) -> No
 
 
 def test_evidence_carries_approval_requests_and_decisions(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     store.create_run("Process the invoices", "invoice-processing", run_id="RUN-0004")
     store.transition("RUN-0004", RunState.RESOLVING)
     store.save_work_order("RUN-0004", WorkOrder.model_validate(WORK_ORDER))
@@ -169,7 +169,7 @@ def test_evidence_carries_approval_requests_and_decisions(tmp_path: Path) -> Non
 
 
 def test_evidence_carries_the_escalation_and_its_open_question(tmp_path: Path) -> None:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     store.create_run("Process the invoices", "invoice-processing", run_id="RUN-0003")
     store.transition("RUN-0003", RunState.RESOLVING)
     store.escalate(

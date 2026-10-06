@@ -1,6 +1,6 @@
-# Operator
+# Verirun
 
-Operator turns a short company Request into completed work. For every Request it:
+Verirun turns a short company Request into completed work. For every Request it:
 
 1. reads the **Company Context** (SOPs, policies, system registry, precedents) to
    discover the unstated steps;
@@ -34,11 +34,11 @@ Suite: **invoice processing** and **vendor onboarding**.
 ```bash
 uv sync
 uv run playwright install chromium          # add --with-deps on a fresh Linux box
-cp .env.example .env                        # fill in OPERATOR_API_KEY for live runs
+cp .env.example .env                        # fill in VERIRUN_API_KEY for live runs
 ```
 
 The demo and the test suite run offline and need no API key. Live model calls
-happen only when you start a request (`operator run`) or approve a parked Run in
+happen only when you start a request (`verirun run`) or approve a parked Run in
 the dashboard; both use the gateway settings from `.env`.
 
 ## Run the demo
@@ -65,14 +65,14 @@ the screenshot, or `--state-dir`, `--shared`, and `--runs` to relocate state.
 
 ```bash
 uv run python scripts/seed_mocks.py
-uv run operator run "Process the invoices in the AP mailbox" --task invoice-processing
+uv run verirun run "Process the invoices in the AP mailbox" --task invoice-processing
 ```
 
 `--task` is required: it selects the Task Pack. The other pack is
 `vendor-onboarding`, for example:
 
 ```bash
-uv run operator run "Onboard the new supplier from the procurement mailbox" --task vendor-onboarding
+uv run verirun run "Onboard the new supplier from the procurement mailbox" --task vendor-onboarding
 ```
 
 The CLI prints the Work Order, the Plan, the Verifier's checks, and where the
@@ -82,13 +82,13 @@ Evidence Pack was written. A Run that needs a human exits non-zero and parks in
 Re-render the Evidence Pack for a finished Run at any time:
 
 ```bash
-uv run operator report <run-id>
+uv run verirun report <run-id>
 ```
 
 ## Dashboard
 
 ```bash
-uv run operator serve                       # http://127.0.0.1:8000
+uv run verirun serve                        # http://127.0.0.1:8000
 ```
 
 The dashboard lists Runs and shows the Work Order, the Plan, a live timeline of
@@ -195,19 +195,19 @@ is called at runtime; MailDesk and LedgerLite run locally.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `OPERATOR_BASE_URL` | `https://opencode.ai/zen/go/v1` | Any OpenAI-compatible gateway. |
-| `OPERATOR_API_KEY` | empty | Required for `live` and `record` modes. |
-| `OPERATOR_MODEL_LOOP` | `deepseek-v4.1-flash` | Fast model for the Execute tool loop. |
-| `OPERATOR_MODEL_REASON` | `deepseek-v4-pro` | Stronger model for Resolve, Plan, and Verify. |
-| `OPERATOR_MODEL_VISION` | `deepseek-v4-flash-vision-exp` | Reads image-only scanned documents. |
-| `OPERATOR_LLM_MODE` | `live` | `live`, `record`, or `replay`. |
-| `OPERATOR_FIXTURE_DIR` | `tests/fixtures/llm` | Recorded responses keyed by request hash. |
-| `OPERATOR_MAX_STEPS` | `60` | Per-run step meter. |
-| `OPERATOR_MAX_COST_USD` | `5.0` | Per-run cost meter. |
-| `OPERATOR_REQUEST_TIMEOUT_S` | `600` | Per-request model timeout; transient timeouts are retried. |
+| `VERIRUN_BASE_URL` | `https://opencode.ai/zen/go/v1` | Any OpenAI-compatible gateway. |
+| `VERIRUN_API_KEY` | empty | Required for `live` and `record` modes. |
+| `VERIRUN_MODEL_LOOP` | `deepseek-v4.1-flash` | Fast model for the Execute tool loop. |
+| `VERIRUN_MODEL_REASON` | `deepseek-v4-pro` | Stronger model for Resolve, Plan, and Verify. |
+| `VERIRUN_MODEL_VISION` | `deepseek-v4-flash-vision-exp` | Reads image-only scanned documents. |
+| `VERIRUN_LLM_MODE` | `live` | `live`, `record`, or `replay`. |
+| `VERIRUN_FIXTURE_DIR` | `tests/fixtures/llm` | Recorded responses keyed by request hash. |
+| `VERIRUN_MAX_STEPS` | `60` | Per-run step meter. |
+| `VERIRUN_MAX_COST_USD` | `5.0` | Per-run cost meter. |
+| `VERIRUN_REQUEST_TIMEOUT_S` | `600` | Per-request model timeout; transient timeouts are retried. |
 
 Prompt caching is enabled by sending a stable per-run session id header. Model
-prices live in `src/company_operator/config.py` and drive the cost meter.
+prices live in `src/verirun/config.py` and drive the cost meter.
 `replay` mode serves recorded fixtures offline; `record` mode
 (`uv run python scripts/record_llm_fixtures.py`) refreshes them when prompts or
 the Company Context change.
@@ -266,7 +266,7 @@ With two more weeks, in priority order:
 ## Repository layout
 
 ```
-src/company_operator/
+src/verirun/
 ├── engine/        # state machine, planner, executor, verifier, adaptation
 ├── context/       # Company Context loader, Work Order, Task Packs
 ├── llm/           # OpenAI-compatible client, replay, cost meter
@@ -280,3 +280,7 @@ scripts/           # seed, serve, demo, fixture recording
 tests/             # integration, acceptance, and unit tests
 docs/              # architecture and ADRs
 ```
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).

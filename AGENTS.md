@@ -6,7 +6,7 @@
 - Browser tests need Chromium: `uv run playwright install chromium` (add `--with-deps` on a fresh Linux box).
 - Test: `uv run pytest`
 - Lint: `uv run ruff check .`
-- CLI: `uv run operator --help`
+- CLI: `uv run verirun --help`
 - Live LLM settings come from `.env` (gitignored); see `.env.example`.
 - Read `SPEC.md` (product spec), `docs/ARCHITECTURE.md` (high-level design), and `CONTEXT.md` (glossary) before starting a ticket.
 

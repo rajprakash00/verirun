@@ -9,11 +9,11 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from company_operator.engine.orchestrator import report_run
-from company_operator.runs.evidence import build_evidence, write_evidence
-from company_operator.runs.report import render_evidence_html, write_evidence_html
-from company_operator.runs.store import RunStore
 from tests.support import seed_completed_run
+from verirun.engine.orchestrator import report_run
+from verirun.runs.evidence import build_evidence, write_evidence
+from verirun.runs.report import render_evidence_html, write_evidence_html
+from verirun.runs.store import RunStore
 
 PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -21,7 +21,7 @@ PNG = base64.b64decode(
 
 
 def seeded_store(tmp_path: Path) -> RunStore:
-    store = RunStore(tmp_path / "runs" / "operator.db")
+    store = RunStore(tmp_path / "runs" / "verirun.db")
     seed_completed_run(store)
     return store
 

@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from company_operator.context.models import ApprovalGate, WorkOrder
-from company_operator.engine.models import CheckResult, Observation, Plan, Step
-from company_operator.engine.states import RunState, StepState
-from company_operator.runs.models import ApprovalRequest
-from company_operator.runs.store import RunNotFoundError, RunStore
+from verirun.context.models import ApprovalGate, WorkOrder
+from verirun.engine.models import CheckResult, Observation, Plan, Step
+from verirun.engine.states import RunState, StepState
+from verirun.runs.models import ApprovalRequest
+from verirun.runs.store import RunNotFoundError, RunStore
 
 
 def work_order() -> WorkOrder:

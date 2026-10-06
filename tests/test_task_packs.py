@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from company_operator.context.task_pack import TaskPackError, load_task_pack
+from verirun.context.task_pack import TaskPackError, load_task_pack
 
 VALID = """\
 id: sample-task
@@ -225,7 +225,7 @@ def test_missing_file_is_reported_clearly(tmp_path: Path) -> None:
 
 
 def test_shipped_invoice_pack_is_valid() -> None:
-    from company_operator.context.company import load_company_context
+    from verirun.context.company import load_company_context
 
     root = Path(__file__).resolve().parents[1]
     pack = load_task_pack(root / "tasks" / "invoice-processing.yaml")
@@ -241,7 +241,7 @@ def test_shipped_invoice_pack_is_valid() -> None:
 
 
 def test_shipped_vendor_onboarding_pack_is_valid() -> None:
-    from company_operator.context.company import load_company_context
+    from verirun.context.company import load_company_context
 
     root = Path(__file__).resolve().parents[1]
     pack = load_task_pack(root / "tasks" / "vendor-onboarding.yaml")

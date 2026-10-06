@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from company_operator.context.company import (
+from verirun.context.company import (
     CompanyContextError,
     load_company_context,
 )

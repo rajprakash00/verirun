@@ -4,7 +4,7 @@ Date: 2026-07-30
 Task: invoice-processing
 
 Bright Path Consulting sent an invoice without any purchase order reference.
-The Operator could not match it against a PO or goods receipt, so it filed
+Verirun could not match it against a PO or goods receipt, so it filed
 nothing. It saved the invoice and sent the AP owner a question asking for the
 PO number.
 

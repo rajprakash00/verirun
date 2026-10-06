@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from company_operator.cli import format_run, main
-from company_operator.config import Settings
-from company_operator.context.company import load_company_context
-from company_operator.context.task_pack import load_task_pack
-from company_operator.engine.orchestrator import start_run
-from company_operator.engine.states import RunState
-from company_operator.llm.client import build_client
-from company_operator.runs.store import RunStore, generate_run_id
 from tests.support import ROOT
+from verirun.cli import format_run, main
+from verirun.config import Settings
+from verirun.context.company import load_company_context
+from verirun.context.task_pack import load_task_pack
+from verirun.engine.orchestrator import start_run
+from verirun.engine.states import RunState
+from verirun.llm.client import build_client
+from verirun.runs.store import RunStore, generate_run_id
 
 FIXTURES = ROOT / "tests" / "fixtures" / "llm"
 
@@ -29,7 +29,7 @@ def replay_settings(tmp_path: Path) -> Settings:
         fixture_dir=FIXTURES,
         company_dir=ROOT / "company",
         tasks_dir=ROOT / "tasks",
-        run_db=tmp_path / "runs" / "operator.db",
+        run_db=tmp_path / "runs" / "verirun.db",
     )
 
 

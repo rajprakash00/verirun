@@ -7,9 +7,9 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-from company_operator.tools import ToolRegistry
-from company_operator.tools.erp import build_erp_tools
 from mocks.ledgerlite import db
+from verirun.tools import ToolRegistry
+from verirun.tools.erp import build_erp_tools
 
 ALL_TOOLS = [
     "erp.list_vendors",

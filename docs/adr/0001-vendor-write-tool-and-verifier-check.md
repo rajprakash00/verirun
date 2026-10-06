@@ -22,14 +22,14 @@ that writes a vendor would need them.
 
 Add two additive, task-agnostic hooks.
 
-1. `erp.create_vendor` in `src/company_operator/tools/erp.py`. A generic
+1. `erp.create_vendor` in `src/verirun/tools/erp.py`. A generic
    LedgerLite write tool: `side_effect = True`, `irreversible = True`, action
    `vendor.create`. It records the legal name, tax id, address, and contact
    email, rejects a vendor whose tax id or name already exists, reporting the
    existing record, and never invents a tax id. `vendor.create` is
    approval-gated by the new `vendor-management` policy, so the existing engine
    parks the Run before submission; no engine change was needed.
-2. `erp_vendor_matches` in `src/company_operator/engine/verify.py`. A generic
+2. `erp_vendor_matches` in `src/verirun/engine/verify.py`. A generic
    check over a Run's completed `erp.create_vendor` claims: the vendor exists in
    LedgerLite exactly once for its tax id and name, and the legal name, tax id,
    address, and contact email agree with the source tax form read independently

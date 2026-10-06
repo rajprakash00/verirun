@@ -1,4 +1,4 @@
-# Systems the Operator may use in this sandbox.
+# Systems Verirun may use in this sandbox.
 #
 # Credentials are sandbox-only. The base URLs match the Mock Suite defaults in
 # scripts/serve_maildesk.py and scripts/serve_ledgerlite.py.

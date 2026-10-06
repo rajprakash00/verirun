@@ -1,4 +1,4 @@
-"""Run the full Operator demo end to end against the seeded Mock Suite.
+"""Run the full Verirun demo end to end against the seeded Mock Suite.
 
 Three scenarios on one unchanged engine:
 
@@ -30,19 +30,19 @@ from pathlib import Path
 import httpx
 import uvicorn
 
-from company_operator.config import Settings
-from company_operator.context.company import CompanyContext, load_company_context
-from company_operator.context.task_pack import TaskPack, load_task_pack
-from company_operator.engine.approve import approve
-from company_operator.engine.orchestrator import resume_run, run_task
-from company_operator.engine.states import RunState
-from company_operator.llm.client import AssistantTurn, ToolCall, Usage
-from company_operator.runs.models import Run
-from company_operator.runs.store import RunStore, generate_run_id
-from company_operator.runtime import build_registry
-from company_operator.tools import BrowserSession, ToolRegistry
 from mocks.ledgerlite.app import create_app as create_ledgerlite_app
 from mocks.seed.suite import reset_and_seed_suite
+from verirun.config import Settings
+from verirun.context.company import CompanyContext, load_company_context
+from verirun.context.task_pack import TaskPack, load_task_pack
+from verirun.engine.approve import approve
+from verirun.engine.orchestrator import resume_run, run_task
+from verirun.engine.states import RunState
+from verirun.llm.client import AssistantTurn, ToolCall, Usage
+from verirun.runs.models import Run
+from verirun.runs.store import RunStore, generate_run_id
+from verirun.runtime import build_registry
+from verirun.tools import BrowserSession, ToolRegistry
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -444,7 +444,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _env_file=None,
         company_dir=ROOT / "company",
         tasks_dir=ROOT / "tasks",
-        run_db=args.runs / "operator.db",
+        run_db=args.runs / "verirun.db",
         shared_dir=args.shared,
         mail_db=maildesk_db,
         erp_db=ledgerlite_db,
@@ -453,7 +453,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     context = load_company_context(settings.company_dir)
     task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
 
-    print("Operator demo — three scenarios on one unchanged engine")
+    print("Verirun demo — three scenarios on one unchanged engine")
     print(f"  company {settings.company_dir} · task pack {task_pack.id}")
     print()
 

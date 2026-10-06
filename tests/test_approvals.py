@@ -12,14 +12,14 @@ import json
 from contextlib import closing
 from pathlib import Path
 
-from company_operator.context.company import load_company_context
-from company_operator.context.task_pack import load_task_pack
-from company_operator.engine.approve import approve, reject
-from company_operator.engine.orchestrator import resume_run
-from company_operator.engine.states import RunState
-from company_operator.runtime import build_registry
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import FILED_INVOICE_ID, park_over_limit_run
+from verirun.context.company import load_company_context
+from verirun.context.task_pack import load_task_pack
+from verirun.engine.approve import approve, reject
+from verirun.engine.orchestrator import resume_run
+from verirun.engine.states import RunState
+from verirun.runtime import build_registry
 
 
 def test_an_over_limit_payment_parks_before_submission(

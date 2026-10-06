@@ -18,8 +18,8 @@ without an API key.
 ## Decision
 
 Put the LLM behind a narrow `LLMClient` protocol
-(`src/company_operator/llm/client.py`) with three implementations selected by
-`OPERATOR_LLM_MODE`:
+(`src/verirun/llm/client.py`) with three implementations selected by
+`VERIRUN_LLM_MODE`:
 
 1. **LiveClient** — an OpenAI-compatible chat-completions client. The only
    network call in the system, with a stable per-run session id for prompt

@@ -10,13 +10,13 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from company_operator.context.task_pack import TaskPack, load_task_pack
-from company_operator.engine.states import RunState
-from company_operator.engine.verify import verify_run
-from company_operator.runs.store import RunStore
-from company_operator.tools import ToolRegistry, build_erp_tools, build_file_tools
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import ROOT, ScriptedClient, vision_fields
+from verirun.context.task_pack import TaskPack, load_task_pack
+from verirun.engine.states import RunState
+from verirun.engine.verify import verify_run
+from verirun.runs.store import RunStore
+from verirun.tools import ToolRegistry, build_erp_tools, build_file_tools
 
 INVOICE = {
     "number": "NW-2026-001",

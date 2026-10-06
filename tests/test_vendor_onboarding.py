@@ -15,12 +15,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from company_operator.cli import main
-from company_operator.engine.states import RunState
-from company_operator.runs.store import RunStore
-from company_operator.web import create_app
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import ScriptedClient, run_settings, text_turn, tool_turn
+from verirun.cli import main
+from verirun.engine.states import RunState
+from verirun.runs.store import RunStore
+from verirun.web import create_app
 
 CASCADE = {
     "name": "Cascade Fabrication LLC",

@@ -14,16 +14,16 @@ from typing import Any
 import httpx
 import uvicorn
 
-from company_operator.config import Settings
-from company_operator.context.company import load_company_context
-from company_operator.context.models import WorkOrder
-from company_operator.context.task_pack import load_task_pack
-from company_operator.engine.models import CheckResult, Observation, Plan
-from company_operator.engine.orchestrator import run_task
-from company_operator.engine.states import RunState
-from company_operator.llm.client import AssistantTurn, ToolCall, Usage
-from company_operator.runs.store import RunStore
-from company_operator.runtime import build_registry
+from verirun.config import Settings
+from verirun.context.company import load_company_context
+from verirun.context.models import WorkOrder
+from verirun.context.task_pack import load_task_pack
+from verirun.engine.models import CheckResult, Observation, Plan
+from verirun.engine.orchestrator import run_task
+from verirun.engine.states import RunState
+from verirun.llm.client import AssistantTurn, ToolCall, Usage
+from verirun.runs.store import RunStore
+from verirun.runtime import build_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,7 +33,7 @@ def run_settings(tmp_path: Path, *, ledgerlite_db: Path, maildesk_state: Any) ->
         _env_file=None,
         company_dir=ROOT / "company",
         tasks_dir=ROOT / "tasks",
-        run_db=tmp_path / "runs" / "operator.db",
+        run_db=tmp_path / "runs" / "verirun.db",
         shared_dir=maildesk_state.shared_root,
         mail_db=maildesk_state.db_path,
         erp_db=ledgerlite_db,

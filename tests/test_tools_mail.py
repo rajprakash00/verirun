@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from company_operator.tools import ToolRegistry
-from company_operator.tools.mail import build_mail_tools
+from verirun.tools import ToolRegistry
+from verirun.tools.mail import build_mail_tools
 
 
 def registry(db_path: Path, shared_root: Path) -> ToolRegistry:

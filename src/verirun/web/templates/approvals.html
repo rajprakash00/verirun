@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Approvals — Verirun{% endblock %}
+{% block content %}
+<h1>Approval queue</h1>
+<p class="subtitle">Irreversible actions Verirun prepared and will not submit without a human yes.</p>
+{% if approvals %}
+  {% for request in approvals %}
+  <div class="card">
+    <h2>{{ request.tool }} <span class="state state-awaiting_approval">pending</span></h2>
+    <p>{{ request.reason }}</p>
+    <p class="muted">
+      Run <a href="/runs/{{ request.run_id }}"><code>{{ request.run_id }}</code></a> ·
+      step <code>{{ request.step_id }}</code>
+      {% if request.policy %} · policy <code>{{ request.policy }}</code>{% endif %}
+      {% if request.rule %} · rule <code>{{ request.rule }}</code>{% endif %}
+      · requested {{ request.created_at.strftime("%Y-%m-%d %H:%M:%S") }}
+    </p>
+    <p>Action <code>{{ request.action }}</code> with arguments <code>{{ request.arguments | tojson }}</code></p>
+    <div class="actions">
+      <form method="post" action="/approvals/{{ request.id }}/approve">
+        <button type="submit">Approve</button>
+      </form>
+      <form method="post" action="/approvals/{{ request.id }}/reject">
+        <input type="text" name="reason" placeholder="Reason for rejection" required>
+        <button type="submit" class="reject">Reject</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<p class="muted">Nothing is waiting for a human.</p>
+{% endif %}
+{% endblock %}

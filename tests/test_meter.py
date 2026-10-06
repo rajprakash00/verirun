@@ -1,8 +1,8 @@
 import pytest
 
-from company_operator.config import ModelPrice
-from company_operator.llm.client import Usage
-from company_operator.llm.meter import CostMeter
+from verirun.config import ModelPrice
+from verirun.llm.client import Usage
+from verirun.llm.meter import CostMeter
 
 
 def test_cost_meter_computes_cost_from_usage() -> None:
