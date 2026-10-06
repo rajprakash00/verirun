@@ -13,9 +13,12 @@ an Evidence Pack.
                                         │
                         ┌───────────────▼──────────────┐
                         │        Run Orchestrator       │
-                        │  Resolve → Plan → Approve →   │
-                        │  Execute → Observe → Verify → │
-                        │  Report                       │
+                        │  created → resolving →        │
+                        │  planned → executing →        │
+                        │  verifying → completed        │
+                        │  (plus awaiting_approval,     │
+                        │  needs_human, failed,         │
+                        │  limit_reached)               │
                         └───┬──────────────────┬────────┘
                             │                  │
              ┌──────────────▼─────┐   ┌────────▼──────────┐
@@ -32,19 +35,46 @@ an Evidence Pack.
 
  Company Context (SOPs, policies, registry) ──► Orchestrator
  Task Packs (YAML)                          ──► Orchestrator
- LLM client (live | replay)                 ──► Orchestrator + Verifier
+ LLM client (live | record | replay)        ──► Orchestrator + Verifier
 ```
 
 ## 2. Engine
 
-- `Resolve`: turn the Request + Company Context into a Work Order (assumptions, steps,
-  systems, approval gates, success criteria). Ambiguity is resolved from policy or escalated.
-- `Plan`: produce an ordered plan of Steps from the Work Order and the Task Pack.
-- `Approve`: pause at Approval Gates before irreversible actions.
-- `Execute`: a ReAct-style tool loop. One Step at a time: think, call one Tool, observe.
-- `Observe`: record the Observation; update run state.
-- `Verify`: hand over to the Verifier.
-- `Report`: produce the Evidence Pack.
+The Run is a guarded state machine (`src/verirun/engine/states.py`). Every
+transition is persisted in the run store.
+
+| State | What happens |
+| --- | --- |
+| `created` | The Run exists; nothing has happened yet. |
+| `resolving` | Resolve and Plan: the Work Order is written from the Request and Company Context, then the Plan from the Work Order and the Task Pack. A question the context cannot answer parks the Run in `needs_human`. |
+| `planned` | The Plan is ready to execute. |
+| `executing` | The ReAct tool loop: one Step at a time — think, call one Tool, Observe the result. |
+| `awaiting_approval` | The policy gate prepared an irreversible action and parked the Run; it resumes only on a human yes/no. |
+| `verifying` | The Verifier checks the outcome against ground truth. |
+| `completed` | Every verification criterion passed. Terminal. |
+| `needs_human` | An escalation with one question; a human answer resumes the Run. |
+| `failed` | A rejected approval or an unrecoverable error. Resumable where a transition allows. |
+| `limit_reached` | The step or cost meter stopped the Run. Terminal. |
+
+The allowed transitions:
+
+```
+created          → resolving | failed
+resolving        → planned | needs_human | failed
+planned          → awaiting_approval | executing | needs_human | failed
+awaiting_approval → executing | needs_human | failed
+executing        → awaiting_approval | verifying | needs_human | failed | limit_reached
+verifying        → completed | needs_human | failed
+failed           → resolving | executing
+needs_human      → planned | executing
+```
+
+`completed` and `limit_reached` are terminal. Three names from the product
+vocabulary are not states: Observe happens inside `executing` (every Tool call
+records an Observation), Approve is the `awaiting_approval` state entered from
+inside `executing`, and Report is not a state at all — `run_task` and
+`resume_run` write the Evidence Pack before returning, whatever state the Run
+is in.
 
 Failure escalation order is fixed: **retry → alternate strategy → re-plan → escalate**.
 A single orchestrator runs the loop; the Verifier is a separate phase, not a second worker.
@@ -63,16 +93,22 @@ retry stays visible. Failures resolve in a fixed order:
 4. **Escalate** — the Run parks in `needs_human` with an open question, and keeps
    its plan, journal, and checkpoints so a human can resume it.
 
-Business conditions that retrying cannot fix skip the ladder. The documented
-terminal state for each seeded scenario:
+Business conditions that retrying cannot fix skip the ladder. The seeded
+scenarios and their terminal states:
 
 | Scenario | Terminal state | Recorded reason |
 | --- | --- | --- |
+| Happy path | `completed` | (none; every verification criterion passes) |
 | Transient write failure | `completed` after one retry | (none; the retry succeeds) |
+| Scanned invoice | `completed` via the vision path | (none; extraction is above the confidence threshold) |
+| Over-limit approval | `awaiting_approval`, then `completed` after a human approves | (none; the gate waits) |
 | Duplicate invoice | `needs_human` | the existing invoice id and status |
 | Amount mismatch | `needs_human` | invoice amount vs purchase order or goods receipt amount |
 | Missing purchase order | `needs_human` | the model's question asking for the PO |
 | Forbidden action | `needs_human` | the policy id and rule that denied the action |
+| Vendor onboarding | `awaiting_approval`, then `completed` after a human approves | (none; the gate waits) |
+| Duplicate vendor | `needs_human` | the existing vendor id and status |
+| Missing tax form | `needs_human` | the model's question asking for the form |
 
 The model can also escalate explicitly with the engine-owned `task.escalate`
 tool when it finds a blocker no tool can resolve, such as a missing purchase
@@ -96,21 +132,22 @@ task-specific logic; swapping the Task Pack swaps the task. Demonstrated with
 
 - **MailDesk**: webmail UI with seeded invoice and vendor emails plus attachments.
 - **LedgerLite**: ERP UI with vendors, purchase orders, goods receipts, invoices, payments,
-  and approvals; exposes an API used by the Verifier.
+  and approvals; exposes an HTTP API for its UI and the tests, and the Verifier reads its
+  SQLite database directly.
 - **shared/**: documents (PDFs, scans, tax forms) and archive folders.
 - **SQLite**: system state; seed scripts create all scenarios.
 
 ## 6. Human-in-the-loop
 
 Approval Gates are declared per Task Pack. Irreversible actions (schedule payment above
-limit, create vendor, send external email) may be prepared but not submitted. Decisions
+limit, create vendor) may be prepared but not submitted. Decisions
 arrive through the dashboard approval queue. Timeouts never auto-approve. Ambiguity or
 repeated failure escalates with a question.
 
 ## 7. Verification
 
 The Verifier reads the Task Pack's verification contract and checks real state through the
-LedgerLite API/database and the filesystem. It does not read the executor's messages and
+LedgerLite database and the filesystem. It does not read the executor's messages and
 does not trust screenshots. Output: pass/fail per criterion with evidence references.
 Screenshots are display evidence only.
 
@@ -128,7 +165,8 @@ Screenshots are display evidence only.
 - Roles: fast tool-loop model, stronger plan/verify model, vision model for scans.
 - Replay mode serves recorded fixtures for deterministic, offline, zero-cost tests.
 - Stable per-run session ID enables prompt caching.
-- Fallback provider configurable; the direct provider key is optional.
+- Live and record modes require `VERIRUN_API_KEY`; replay, the demo, and the test
+  suite need no key.
 
 ## 10. Tech stack
 
@@ -139,8 +177,8 @@ Screenshots are display evidence only.
 | Browser | Playwright (accessibility-tree refs) |
 | Mock apps | FastAPI + SQLite + Jinja templates |
 | Dashboard | FastAPI + lightweight HTML/JS |
-| PDFs | pypdf for text, render-to-image + vision model for scans |
-| Files | pathlib + openpyxl where spreadsheets appear |
+| PDFs | pypdf for text, pypdfium2 page render + vision model for scans |
+| Files | pathlib; fpdf2 generates the seeded mock documents |
 | Tests | pytest, replay LLM fixtures |
 | Lint/format | Ruff |
 | Evidence | JSON + generated static HTML |
@@ -173,10 +211,11 @@ verirun/
 │   ├── maildesk/
 │   ├── ledgerlite/
 │   └── seed/
-├── scripts/                   # dev helpers (seed, record fixtures, serve)
+├── scripts/                   # dev helpers (seed, demo, record fixtures, serve)
 ├── tests/                     # integration + unit tests
 └── docs/
     ├── ARCHITECTURE.md        # this file
     ├── adr/                   # decision records
+    ├── specs/                 # archived specs
     └── agents/                # agent skill configuration
 ```

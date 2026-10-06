@@ -6,8 +6,8 @@ Verirun turns a short company Request into completed work. For every Request it:
    discover the unstated steps;
 2. writes a **Work Order**: assumptions, steps, systems, approval gates, and
    success criteria;
-3. **plans and executes** with real tools (browser, files, mail, internal
-   systems);
+3. **plans and executes** with real tools (files, mail, and internal systems;
+   browser automation through Playwright runs in the demo and the tests);
 4. **observes and adapts** on failure: retry, alternate strategy, re-plan, or
    escalate;
 5. stops at **Approval Gates** before irreversible actions;
@@ -96,8 +96,8 @@ steps and tool calls, the approval queue, and the verification results.
 Approving an over-limit payment resumes the parked Run; rejecting aborts it with
 the recorded reason. A timeout never auto-approves.
 
-To watch the browser tools work against the mocks, serve them too (their URLs
-match `company/systems.yaml`):
+Browser Steps drive pages served by these scripts (their URLs match
+`company/systems.yaml`):
 
 ```bash
 uv run python scripts/serve_maildesk.py     # http://127.0.0.1:8001
@@ -122,9 +122,10 @@ uv run pytest
 uv run ruff check .
 ```
 
-The suite is offline and deterministic. LLM calls are scripted in tests; the
-mocks, the run store, and the Verification checks are all real. Browser tests
-skip automatically when Chromium is unavailable.
+The suite is offline and deterministic. LLM calls are scripted or replayed from
+committed fixtures; no test calls a live model, and the mocks, the run store,
+and the Verification checks are all real. Browser tests skip automatically when
+Chromium is unavailable.
 
 ## The Mock Suite
 
@@ -140,16 +141,19 @@ skip automatically when Chromium is unavailable.
 - **SQLite** (`mocks/state/`) — all state; seeded scenarios are fixed, never
   random.
 
-Seeded scenarios: happy path, duplicate invoice, amount mismatch, missing
-purchase order, over-limit approval, forbidden action, transient write failure,
-and an image-only scanned invoice.
+Seeded invoice scenarios: happy path, duplicate invoice, amount mismatch,
+missing purchase order, over-limit approval, forbidden action, transient write
+failure, and an image-only scanned invoice. Seeded vendor-onboarding scenarios:
+a new vendor, a duplicate vendor, and a missing tax form.
 
 ## Architecture in one minute
 
 ```
 Request ──► CLI | Dashboard ──► Orchestrator
-                                Resolve → Plan → Approve →
-                                Execute → Observe → Verify → Report
+                                created → resolving → planned →
+                                executing → verifying → completed
+                                (awaiting_approval at Approval Gates;
+                                 needs_human, failed, limit_reached)
                                    │                      │
                               Tool Layer               Verifier
                         browser / files / mail / erp   reads ground truth
@@ -157,9 +161,11 @@ Request ──► CLI | Dashboard ──► Orchestrator
                               Mock Suite: MailDesk, LedgerLite, shared files
 ```
 
-- **Engine** — a custom state machine. Inside Execute, a ReAct-style loop runs
-  one Step at a time: think, call one tool, observe. Failures resolve in a fixed
-  order: retry → alternate strategy → re-plan → escalate.
+- **Engine** — a custom state machine. Observe happens inside `executing`: a
+  ReAct-style loop runs one Step at a time — think, call one tool, observe.
+  Approve is the `awaiting_approval` state the policy gate parks in. Failures
+  resolve in a fixed order: retry → alternate strategy → re-plan → escalate.
+  The Evidence Pack is written whenever the Run stops, whatever its state.
 - **Task Packs** (`tasks/*.yaml`) — the declarative definition of one kind of
   work: goal template, SOP, tool allowlist, approval rules, verification
   contract. The engine contains no task-specific logic.
@@ -168,7 +174,7 @@ Request ──► CLI | Dashboard ──► Orchestrator
 - **Tools** — one uniform interface. The browser is real Playwright; the ERP and
   mail tools read and write the mock systems' SQLite state.
 - **Verifier** — reads the Task Pack's contract and checks real state through
-  the LedgerLite API/database and the filesystem. It never reads the executor's
+  the LedgerLite database and the filesystem. It never reads the executor's
   messages and never trusts a screenshot.
 - **Run store** — SQLite: run state, checkpoints, an action journal with
   idempotency keys, observations, and the Evidence Pack index.
@@ -226,6 +232,8 @@ the Company Context change.
 
 ## Known limitations
 
+- The live `run` path and dashboard-resumed Runs do not register the browser
+  tools yet; `browser.*` Steps execute only in the demo and the tests.
 - No native desktop GUI control; only the browser is driven, and only through
   the accessibility tree and file tools.
 - No real external systems, credentials, payments, email sending, or network

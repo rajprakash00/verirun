@@ -35,6 +35,9 @@ validated invoices in LedgerLite and scheduled payments.
   approval threshold prepares a payment but waits for a human approval gate.
 - Never schedule a payment to a blocked vendor. The action-rules policy forbids
   it, and no side effect may happen for a forbidden action.
+- Never split an invoice into several payments to stay under the approval
+  threshold. `erp.schedule_payment` schedules the full invoice amount and
+  rejects partial payments.
 
 ## 5. File, schedule, and archive
 

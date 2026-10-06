@@ -6,6 +6,7 @@ from verirun.context.company import (
     CompanyContextError,
     load_company_context,
 )
+from verirun.tools import build_erp_tools, build_file_tools, build_mail_tools
 
 POLICY = """\
 id: spend-limits
@@ -118,9 +119,11 @@ def test_duplicate_system_id_is_rejected(tmp_path: Path) -> None:
         load_company_context(root)
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_shipped_company_context_matches_the_task_pack() -> None:
-    root = Path(__file__).resolve().parents[1]
-    context = load_company_context(root / "company")
+    context = load_company_context(ROOT / "company")
 
     assert "invoice-processing" in context.sops
     assert "vendor-onboarding" in context.sops
@@ -138,3 +141,22 @@ def test_shipped_company_context_matches_the_task_pack() -> None:
     assert vendor_decision.outcome == "require_approval"
     assert vendor_decision.policy == "vendor-management"
     assert vendor_decision.rule == "vendor-creation-needs-approval"
+
+
+def test_shipped_policies_reference_only_real_tool_actions(tmp_path: Path) -> None:
+    context = load_company_context(ROOT / "company")
+
+    referenced = {
+        action for policy in context.policies for rule in policy.rules for action in rule.actions
+    }
+    tool_actions = {
+        tool.action
+        for tool in (
+            *build_file_tools(tmp_path),
+            *build_mail_tools(tmp_path / "maildesk.db", tmp_path),
+            *build_erp_tools(tmp_path / "ledgerlite.db"),
+        )
+        if tool.action is not None
+    }
+
+    assert referenced <= tool_actions, sorted(referenced - tool_actions)
