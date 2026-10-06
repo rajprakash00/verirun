@@ -148,7 +148,7 @@ Screenshots are display evidence only.
 ## 11. Folder structure
 
 ```
-proxy-work/
+verirun/
 ├── AGENTS.md                  # agent working agreements
 ├── CONTEXT.md                 # domain glossary
 ├── README.md                  # setup, run, architecture, decisions, limits

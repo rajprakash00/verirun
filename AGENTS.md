@@ -14,7 +14,7 @@
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues in `rajprakash00/proxy-work`. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues in `rajprakash00/verirun`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
