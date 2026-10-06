@@ -102,6 +102,6 @@ Testing is deliberately lean. The goal is to lock critical outcomes, not to maxi
 ## Further Notes
 
 - A README covers setup, run instructions, architecture, design decisions, assumptions, and known limitations.
-- A short demo recording shows a run recovering from a failure, pausing for approval, and verifying the outcome.
+- A short demo recording was planned but not recorded in this phase; `scripts/demo.py` runs the scenarios live instead.
 - Key technical decisions are recorded as ADRs in `docs/adr/`.
 - The design favors a narrow, genuinely autonomous system over broad simulated behavior.

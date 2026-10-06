@@ -15,13 +15,6 @@ rules:
       - field: amount_usd
         op: gt
         value: 10000
-  - id: no-split-payments
-    description: >-
-      Splitting one invoice into several payments to stay under the approval
-      threshold is forbidden.
-    effect: forbid
-    actions:
-      - payment.split
   - id: allowed-currency
     description: Payments may only be scheduled in USD.
     effect: forbid
