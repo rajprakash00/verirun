@@ -63,8 +63,8 @@ reported on the run and uploaded to Codecov; the README badge reflects `main`.
 2. Branch from `main`, keep the PR focused, and make sure `uv run pytest` and
    `uv run ruff check .` pass locally.
 3. Describe the behavior change and how you verified it. Note any doc updates.
-4. A maintainer reviews and merges. Commit history follows the
-   `feat:`, `fix:`, `docs:`, `chore:` style already used in the log.
+4. A maintainer reviews and merges. Commit messages use a `type: summary`
+   prefix — `feat:`, `fix:`, `docs:`, `ci:`, or `chore:`.
 
 Changes to the repository describe the product and its engineering only. Keep
 personal, career, marketing, and launch-planning content out.

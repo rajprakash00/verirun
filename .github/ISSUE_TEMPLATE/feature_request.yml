@@ -15,7 +15,7 @@ body:
     id: solution
     attributes:
       label: Proposed solution
-      description: What should change? Note that the engine stays task-agnostic: new work belongs in a Task Pack.
+      description: "What should change? Note the engine stays task-agnostic: new work belongs in a Task Pack."
     validations:
       required: true
   - type: dropdown
