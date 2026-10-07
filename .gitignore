@@ -3,6 +3,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
 *.webm
 *.mp4
 *.db

@@ -34,6 +34,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    "pytest-cov>=7.1.0",
     "ruff>=0.6",
 ]
 
@@ -56,6 +57,19 @@ packages = ["src/verirun", "mocks"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/verirun", "mocks"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
 
 [tool.ruff]
 line-length = 100

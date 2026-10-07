@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a change or a new capability
+title: "[Feature]: "
+labels: ["needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What cannot be done today, and who needs it? A user story is fine.
+      placeholder: "As a ... I want ... so that ..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: "What should change? Note the engine stays task-agnostic: new work belongs in a Task Pack."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Task Pack
+        - Engine
+        - Tools
+        - Mock Suite
+        - Dashboard / CLI
+        - Docs
+        - CI / repository
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

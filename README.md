@@ -1,5 +1,9 @@
 # Verirun
 
+[![CI](https://github.com/rajprakash00/verirun/actions/workflows/ci.yml/badge.svg)](https://github.com/rajprakash00/verirun/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/rajprakash00/verirun/branch/main/graph/badge.svg)](https://codecov.io/gh/rajprakash00/verirun)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Verirun turns a short company Request into completed work. For every Request it:
 
 1. reads the **Company Context** (SOPs, policies, system registry, precedents) to
@@ -125,6 +129,7 @@ Every Run — verified or not — writes two files under `runs/<run-id>/`:
 
 ```bash
 uv run pytest
+uv run pytest --cov --cov-report=term-missing   # coverage of src/verirun and mocks
 uv run ruff check .
 ```
 
@@ -132,6 +137,9 @@ The suite is offline and deterministic. LLM calls are scripted or replayed from
 committed fixtures; no test calls a live model, and the mocks, the run store,
 and the Verification checks are all real. Browser tests skip automatically when
 Chromium is unavailable.
+
+GitHub Actions runs pytest and Ruff on every push and pull request, and uploads
+the coverage report to Codecov.
 
 ## The Mock Suite
 
@@ -295,6 +303,12 @@ scripts/           # seed, serve, demo, fixture recording
 tests/             # integration, acceptance, and unit tests
 docs/              # architecture and ADRs
 ```
+
+## Contributing
+
+Setup, test, and pull request rules live in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Report vulnerabilities privately per [`SECURITY.md`](SECURITY.md); release notes
+are in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 
