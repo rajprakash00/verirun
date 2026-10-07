@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a defect in Verirun
+title: "[Bug]: "
+labels: ["needs-triage"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, Run ids, or a failing test name.
+      placeholder: |
+        1. uv run python scripts/demo.py
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: llm-mode
+    attributes:
+      label: LLM mode
+      options:
+        - replay / demo (offline, no API key)
+        - live
+        - record
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, uv version, and whether Chromium is installed.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: The Run's evidence.json, relevant output, or screenshots. Redact API keys and .env values.
+    validations:
+      required: false
