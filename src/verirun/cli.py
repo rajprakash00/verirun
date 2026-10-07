@@ -18,7 +18,7 @@ from verirun.engine.states import RunState
 from verirun.llm.client import LLMClient, build_client
 from verirun.runs.models import Escalation, Run
 from verirun.runs.store import RunStore, generate_run_id
-from verirun.runtime import build_registry
+from verirun.runtime import live_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,22 +89,22 @@ def _run_command(
         run_id = generate_run_id()
         llm = client or build_client(settings, session_id=run_id)
         store = RunStore(settings.run_db)
-        registry = build_registry(settings, context, task_pack, llm)
-        run = run_task(
-            args.request,
-            task_pack,
-            context,
-            llm,
-            store,
-            registry,
-            erp_db_path=settings.erp_db,
-            shared_root=settings.shared_dir,
-            evidence_root=settings.run_db.parent,
-            max_steps=settings.max_steps,
-            max_cost_usd=settings.max_cost_usd,
-            prices=settings.prices,
-            run_id=run_id,
-        )
+        with live_registry(settings, context, task_pack, llm, run_id) as registry:
+            run = run_task(
+                args.request,
+                task_pack,
+                context,
+                llm,
+                store,
+                registry,
+                erp_db_path=settings.erp_db,
+                shared_root=settings.shared_dir,
+                evidence_root=settings.run_db.parent,
+                max_steps=settings.max_steps,
+                max_cost_usd=settings.max_cost_usd,
+                prices=settings.prices,
+                run_id=run_id,
+            )
     except (CompanyContextError, TaskPackError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -28,7 +28,7 @@ from verirun.runs.store import (
     RunNotFoundError,
     RunStore,
 )
-from verirun.runtime import build_registry
+from verirun.runtime import live_registry
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -83,19 +83,20 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
         context = load_company_context(settings.company_dir)
         task_pack = load_task_pack(settings.tasks_dir / f"{run.task_id}.yaml")
         client = make_client(run_id)
-        resume_run(
-            run_id,
-            task_pack,
-            client,
-            store,
-            build_registry(settings, context, task_pack, client),
-            erp_db_path=settings.erp_db,
-            shared_root=settings.shared_dir,
-            evidence_root=settings.run_db.parent,
-            max_steps=settings.max_steps,
-            max_cost_usd=settings.max_cost_usd,
-            prices=settings.prices,
-        )
+        with live_registry(settings, context, task_pack, client, run_id) as registry:
+            resume_run(
+                run_id,
+                task_pack,
+                client,
+                store,
+                registry,
+                erp_db_path=settings.erp_db,
+                shared_root=settings.shared_dir,
+                evidence_root=settings.run_db.parent,
+                max_steps=settings.max_steps,
+                max_cost_usd=settings.max_cost_usd,
+                prices=settings.prices,
+            )
 
     @app.get("/", response_class=HTMLResponse)
     def runs_page(request: Request) -> Any:
