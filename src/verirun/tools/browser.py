@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
@@ -164,26 +165,29 @@ class BrowserSession:
     def start(self) -> BrowserSession:
         if self._page is not None:
             return self
-        self.artifact_dir.mkdir(parents=True, exist_ok=True)
-        self._screenshots = len(list(self.artifact_dir.glob("screenshot-*.png")))
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=self.headless)
-        self._context = self._browser.new_context(viewport={"width": 1280, "height": 900})
-        self._page = self._context.new_page()
-        self._page.set_default_timeout(self.timeout_ms)
+        try:
+            self.artifact_dir.mkdir(parents=True, exist_ok=True)
+            self._screenshots = len(list(self.artifact_dir.glob("screenshot-*.png")))
+            self._playwright = sync_playwright().start()
+            self._browser = self._playwright.chromium.launch(headless=self.headless)
+            self._context = self._browser.new_context(viewport={"width": 1280, "height": 900})
+            self._page = self._context.new_page()
+            self._page.set_default_timeout(self.timeout_ms)
+        except Exception:
+            self.close()
+            raise
         return self
 
     def close(self) -> None:
+        """Tear down whatever started, never raising from cleanup."""
         for close in (
             self._context.close if self._context else None,
             self._browser.close if self._browser else None,
             self._playwright.stop if self._playwright else None,
         ):
             if close is not None:
-                try:
+                with suppress(Exception):
                     close()
-                except PlaywrightError:
-                    pass
         self._page = None
         self._context = None
         self._browser = None
@@ -197,8 +201,17 @@ class BrowserSession:
 
     @property
     def page(self) -> Page:
+        """The current page, starting Chromium on first use."""
         if self._page is None:
-            raise ToolError("unknown", "the browser session has not been started")
+            try:
+                self.start()
+            except PlaywrightError as exc:
+                raise ToolError(
+                    "unknown",
+                    f"the browser failed to start: {_first_line(exc)}; "
+                    "install Chromium with `uv run playwright install chromium`",
+                ) from exc
+        assert self._page is not None
         return self._page
 
     def locator(self, ref: str) -> Locator:

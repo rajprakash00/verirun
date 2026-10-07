@@ -6,8 +6,8 @@ Verirun turns a short company Request into completed work. For every Request it:
    discover the unstated steps;
 2. writes a **Work Order**: assumptions, steps, systems, approval gates, and
    success criteria;
-3. **plans and executes** with real tools (files, mail, and internal systems;
-   browser automation through Playwright runs in the demo and the tests);
+3. **plans and executes** with real tools: files, mail, internal systems, and
+   browser automation through Playwright;
 4. **observes and adapts** on failure: retry, alternate strategy, re-plan, or
    escalate;
 5. stops at **Approval Gates** before irreversible actions;
@@ -79,6 +79,12 @@ The CLI prints the Work Order, the Plan, the Verifier's checks, and where the
 Evidence Pack was written. A Run that needs a human exits non-zero and parks in
 `needs_human` (question) or `awaiting_approval` (approval queue).
 
+A live Run registers the browser tools whenever the Task Pack allows them.
+Chromium starts on the first `browser.*` call and writes its screenshots under
+`runs/<run-id>/`. When a Plan drives MailDesk or LedgerLite, keep them served —
+see the commands under [Dashboard](#dashboard) — so the URLs from
+`company/systems.yaml` resolve.
+
 Re-render the Evidence Pack for a finished Run at any time:
 
 ```bash
@@ -96,8 +102,8 @@ steps and tool calls, the approval queue, and the verification results.
 Approving an over-limit payment resumes the parked Run; rejecting aborts it with
 the recorded reason. A timeout never auto-approves.
 
-Browser Steps drive pages served by these scripts (their URLs match
-`company/systems.yaml`):
+Browser Steps in a live `run`, a dashboard-resumed Run, or the demo drive pages
+served by these scripts (their URLs match `company/systems.yaml`):
 
 ```bash
 uv run python scripts/serve_maildesk.py     # http://127.0.0.1:8001
@@ -232,8 +238,9 @@ the Company Context change.
 
 ## Known limitations
 
-- The live `run` path and dashboard-resumed Runs do not register the browser
-  tools yet; `browser.*` Steps execute only in the demo and the tests.
+- Browser control depends on the last snapshot's refs; a UI change that
+  invalidates them fails the Step unless the model takes a fresh snapshot, and
+  automatic re-grounding is not built yet.
 - No native desktop GUI control; only the browser is driven, and only through
   the accessibility tree and file tools.
 - No real external systems, credentials, payments, email sending, or network

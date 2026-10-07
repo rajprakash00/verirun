@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from verirun.config import Settings
 from verirun.context.company import CompanyContext
 from verirun.context.task_pack import SCAN_TOOL, TaskPack
@@ -53,3 +56,25 @@ def build_registry(
             )
         )
     return ToolRegistry.from_task_pack(tools, task_pack, gate=PolicyGate(context.policies))
+
+
+@contextmanager
+def live_registry(
+    settings: Settings,
+    context: CompanyContext,
+    task_pack: TaskPack,
+    client: LLMClient,
+    run_id: str,
+) -> Iterator[ToolRegistry]:
+    """The registry for a live Run, shared by the CLI and the dashboard.
+
+    One browser session is scoped to the Run and writes its artifacts into the
+    Run's evidence directory. Chromium starts on the first browser.* call, so a
+    Run that never touches the browser neither pays for it nor needs it
+    installed. The session closes when the Run returns.
+    """
+    session = BrowserSession(artifact_dir=settings.run_db.parent / run_id)
+    try:
+        yield build_registry(settings, context, task_pack, client, browser=session)
+    finally:
+        session.close()
