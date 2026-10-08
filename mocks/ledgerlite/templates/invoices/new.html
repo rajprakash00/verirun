@@ -37,4 +37,46 @@
   </label>
   <button type="submit">File invoice</button>
 </form>
+{% if ui_variant %}
+<script>
+(() => {
+  const variant = {{ ui_variant | tojson }};
+  let changed = false;
+  const relayout = () => {
+    if (changed || !document.querySelector("[data-op-ref]")) return;
+    changed = true;
+    observer.disconnect();
+    document.querySelectorAll("[data-op-ref]").forEach((el) => el.removeAttribute("data-op-ref"));
+    const form = document.querySelector("form.invoice");
+    const children = Array.from(form.children);
+    for (const child of children.reverse()) form.appendChild(child);
+    if (variant === "painted") {
+      const button = form.querySelector("button[type=submit]");
+      const painted = document.createElement("div");
+      painted.id = "painted-submit";
+      painted.textContent = button.textContent;
+      painted.style.cssText =
+        "background:#1d2433;color:#fff;padding:10px 14px;border-radius:4px;" +
+        "cursor:pointer;width:max-content;font:inherit;";
+      painted.addEventListener("click", () => {
+        window.paintedClicks = (window.paintedClicks || 0) + 1;
+        form.requestSubmit();
+      });
+      button.replaceWith(painted);
+    }
+    const back = document.createElement("a");
+    back.href = "/invoices";
+    back.textContent = "Back to invoices";
+    form.prepend(back);
+    window.uiChanged = true;
+  };
+  const observer = new MutationObserver(relayout);
+  observer.observe(document.body, {
+    attributes: true,
+    subtree: true,
+    attributeFilter: ["data-op-ref"],
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

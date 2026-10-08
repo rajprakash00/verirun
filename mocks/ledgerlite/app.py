@@ -91,6 +91,13 @@ def _get_one(conn: sqlite3.Connection, table: str, row_id: str) -> dict:
     return dict(row)
 
 
+# The "UI changed" scenarios: the new-invoice page re-renders itself right after
+# the first accessibility snapshot, so refs taken before the change go stale.
+# "changed" keeps every control semantic; "painted" replaces the submit button
+# with a non-semantic div, so only the vision fallback can reach it.
+UI_VARIANTS = ("changed", "painted")
+
+
 def create_app(db_path: Path) -> FastAPI:
     app = FastAPI(title="LedgerLite", version="0.1.0")
     app.state.db_path = Path(db_path)
@@ -223,7 +230,9 @@ def create_app(db_path: Path) -> FastAPI:
         return render(request, "invoices/list.html", {"invoices": invoices})
 
     @app.get("/invoices/new", response_class=HTMLResponse)
-    def new_invoice_page(request: Request, conn: Conn) -> HTMLResponse:
+    def new_invoice_page(
+        request: Request, conn: Conn, ui: str | None = None
+    ) -> HTMLResponse:
         return render(
             request,
             "invoices/new.html",
@@ -231,6 +240,7 @@ def create_app(db_path: Path) -> FastAPI:
                 "vendors": _select(conn, "vendors", {}),
                 "orders": _select(conn, "purchase_orders", {}),
                 "receipts": _select(conn, "goods_receipts", {}),
+                "ui_variant": ui if ui in UI_VARIANTS else None,
             },
         )
 

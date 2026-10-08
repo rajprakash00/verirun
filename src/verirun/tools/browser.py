@@ -4,19 +4,31 @@ A snapshot walks the accessibility tree of the current page and assigns each
 interactive element a short ref (``e1``, ``e2``, ...) stored in a ``data-op-ref``
 attribute. ``click``, ``type``, ``select``, and ``extract`` address elements by
 that ref, so the executor never has to guess at selectors.
+
+When a ref has gone stale -- the page re-rendered since the snapshot -- the
+session re-grounds automatically: it takes a fresh snapshot, re-resolves the
+control by its role and accessible name, and retries with the new ref. When the
+accessibility tree does not contain the control at all, a screenshot goes to
+the vision model, which reports where the control sits on screen, and the
+action runs on the element at that point. The resolution an action used is
+recorded in its Observation, and therefore in the Run journal, so a retry
+replays the same locator instead of repeating a completed side effect.
 """
 
 from __future__ import annotations
 
+import base64
 import re
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
 from playwright.sync_api import (
     Browser,
     BrowserContext,
+    ElementHandle,
     Locator,
     Page,
     Playwright,
@@ -28,16 +40,17 @@ from playwright.sync_api import (
 from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
+from pydantic import BaseModel, ConfigDict
 
+from verirun.config import ModelPrice
 from verirun.engine.models import Observation
+from verirun.engine.structured import StructuredOutputError, complete_structured
+from verirun.llm.client import AssistantTurn, LLMClient, Message
+from verirun.llm.meter import CostMeter
 from verirun.tools.base import Tool, ToolError, optional_bool, optional_str, require_str
 
-SNAPSHOT_JS = r"""
-() => {
+IDENTITY_JS = r"""
   const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
-  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
-  const skip = new Set(["script", "style", "noscript", "template", "svg", "path",
-                        "head", "meta", "link", "title"]);
   const roleOf = (el) => {
     const explicit = (el.getAttribute("role") || "").trim();
     if (explicit) return explicit;
@@ -84,6 +97,15 @@ SNAPSHOT_JS = r"""
     }
     return clean(el.getAttribute("title") || el.getAttribute("name") || el.textContent || "");
   };
+"""
+
+SNAPSHOT_JS = (
+    r"""() => {"""
+    + IDENTITY_JS
+    + r"""
+  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const skip = new Set(["script", "style", "noscript", "template", "svg", "path",
+                        "head", "meta", "link", "title"]);
   const nodes = [];
   let counter = 0;
   document.querySelectorAll("[data-op-ref]").forEach((el) => el.removeAttribute("data-op-ref"));
@@ -127,6 +149,49 @@ SNAPSHOT_JS = r"""
   return { url: location.href, title: document.title, nodes: nodes };
 }
 """
+)
+
+ELEMENT_IDENTITY_JS = (
+    r"""el => {"""
+    + IDENTITY_JS
+    + r"""
+  return { role: roleOf(el), name: nameOf(el) };
+}"""
+)
+
+EXTRACT_JS = (
+    "el => (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' "
+    "|| el.tagName === 'SELECT') ? el.value : el.innerText"
+)
+
+VISION_MIN_CONFIDENCE = 0.5
+
+VISION_SYSTEM_PROMPT = """\
+You are the visual fallback of Verirun's browser tools. The accessibility tree
+did not contain the control, so you read a screenshot and report where the
+control sits. You never guess: if you cannot see the control, you say so.
+"""
+
+
+class ElementLocation(BaseModel):
+    """Where the vision model saw the missing control, in screenshot pixels."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    found: bool
+    x: int | None = None
+    y: int | None = None
+    confidence: float = 0.0
+
+
+def vision_locate_prompt(role: str, name: str, *, width: int, height: int) -> str:
+    return (
+        f"Find the {role} with the accessible name {name!r} in this screenshot "
+        f"(image size {width}x{height} pixels). Reply with one JSON object: "
+        '{"found": true, "x": <center x in pixels>, "y": <center y in pixels>, '
+        '"confidence": <0 to 1>}. If the control is not visible, reply '
+        '{"found": false, "x": null, "y": null, "confidence": 0}.'
+    )
 
 
 def _format_snapshot(nodes: list[dict[str, Any]]) -> str:
@@ -143,6 +208,155 @@ def _format_snapshot(nodes: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _ref_selector(ref: str) -> str:
+    return f'[data-op-ref="{ref}"]'
+
+
+def _element_identity(locator: Locator) -> dict[str, str] | None:
+    """The role and accessible name of the element a ref points at now."""
+    try:
+        payload = locator.evaluate(ELEMENT_IDENTITY_JS)
+    except PlaywrightError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "role": str(payload.get("role") or ""),
+        "name": str(payload.get("name") or ""),
+    }
+
+
+def _identity_matches(actual: dict[str, str], known: dict[str, str]) -> bool:
+    return actual["role"] == known["role"] and (
+        actual["name"].casefold() == known["name"].casefold()
+    )
+
+
+def _match_node(nodes: list[dict[str, Any]], role: str, name: str) -> dict[str, Any] | None:
+    """The interactive node that re-grounds a target by role and name.
+
+    An exact name wins, then a case-insensitive name, then the single node
+    whose name contains the wanted one. An ambiguous match is no match.
+    """
+    candidates = [node for node in nodes if node.get("ref") and node.get("role") == role]
+    for node in candidates:
+        if node.get("name") == name:
+            return node
+    for node in candidates:
+        if str(node.get("name") or "").casefold() == name.casefold():
+            return node
+    wanted = name.casefold()
+    if not wanted:
+        return None
+    contains = [
+        node for node in candidates if wanted in str(node.get("name") or "").casefold()
+    ]
+    return contains[0] if len(contains) == 1 else None
+
+
+def _turns_cost(
+    turns: list[AssistantTurn], prices: dict[str, ModelPrice]
+) -> tuple[dict[str, Any], float]:
+    meter = CostMeter(prices)
+    for turn in turns:
+        meter.add(turn.model, turn.usage)
+    return meter.snapshot(), meter.total_usd
+
+
+def _element_at(page: Page, point: tuple[int, int]) -> ElementHandle | None:
+    try:
+        handle = page.evaluate_handle(
+            "([x, y]) => document.elementFromPoint(x, y)", list(point)
+        )
+    except PlaywrightError as exc:
+        raise ToolError(
+            "not_found", f"cannot inspect the page at {point}: {_first_line(exc)}"
+        ) from exc
+    return handle.as_element()
+
+
+@dataclass(frozen=True)
+class ResolvedTarget:
+    """One resolved browser control, ready for an action.
+
+    ``method`` says how it was resolved: ``ref`` (the requested ref was still
+    current), ``replay`` (a locator resolved earlier for the same ref),
+    ``snapshot`` (a fresh snapshot matched the role and accessible name), or
+    ``vision`` (the accessibility tree did not contain it and the vision model
+    located it on screen).
+    """
+
+    requested_ref: str
+    role: str
+    name: str
+    method: str
+    ref: str | None = None
+    locator: Locator | None = None
+    element: ElementHandle | None = None
+    point: tuple[int, int] | None = None
+    confidence: float | None = None
+    artifacts: tuple[str, ...] = ()
+    usage: dict[str, Any] | None = None
+    cost_usd: float = 0.0
+
+    @property
+    def regrounded(self) -> bool:
+        return self.method != "ref"
+
+    @property
+    def handle(self) -> Locator | ElementHandle:
+        handle = self.locator if self.locator is not None else self.element
+        if handle is None:
+            raise ToolError("unknown", "the resolved target has no locator")
+        return handle
+
+    def click(self) -> None:
+        self.handle.click()
+
+    def fill(self, text: str) -> None:
+        self.handle.fill(text)
+
+    def press(self, key: str) -> None:
+        self.handle.press(key)
+
+    def select_option(self, value: str) -> None:
+        self.handle.select_option(value=value)
+
+    def evaluate(self, expression: str) -> Any:
+        return self.handle.evaluate(expression)
+
+    def journal_data(self, **extra: Any) -> dict[str, Any]:
+        """The Observation payload: the requested ref plus the locator used."""
+        locator: dict[str, Any] = {
+            "role": self.role,
+            "name": self.name,
+            "method": self.method,
+        }
+        if self.ref is not None:
+            locator["ref"] = self.ref
+        if self.point is not None:
+            locator["point"] = list(self.point)
+        if self.confidence is not None:
+            locator["confidence"] = self.confidence
+        data: dict[str, Any] = {
+            "ref": self.requested_ref,
+            "locator": locator,
+            "regrounded": self.regrounded,
+            **extra,
+        }
+        if self.usage is not None:
+            data["usage"] = self.usage
+        if self.cost_usd > 0:
+            data["cost_usd"] = self.cost_usd
+        return data
+
+
+def _summary(text: str, target: ResolvedTarget) -> str:
+    if target.regrounded:
+        return f"{text} (re-grounded via {target.method})"
+    return text
+
+
 class BrowserSession:
     """One Chromium session shared by the browser tools of a Run."""
 
@@ -152,15 +366,21 @@ class BrowserSession:
         *,
         headless: bool = True,
         timeout_ms: int = 5_000,
+        client: LLMClient | None = None,
+        prices: dict[str, ModelPrice] | None = None,
     ) -> None:
         self.artifact_dir = Path(artifact_dir)
         self.headless = headless
         self.timeout_ms = timeout_ms
+        self._client = client
+        self._prices = dict(prices or {})
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._screenshots = 0
+        self._known_refs: dict[str, dict[str, str]] = {}
+        self._resolved_refs: dict[str, str] = {}
 
     def start(self) -> BrowserSession:
         if self._page is not None:
@@ -214,14 +434,173 @@ class BrowserSession:
         assert self._page is not None
         return self._page
 
-    def locator(self, ref: str) -> Locator:
-        locator = self.page.locator(f'[data-op-ref="{ref}"]')
-        if locator.count() == 0:
+    def snapshot(self) -> dict[str, Any]:
+        """A fresh accessibility snapshot; its refs become the model's view."""
+        payload = self._fresh_snapshot()
+        for node in payload.get("nodes") or []:
+            if node.get("ref"):
+                self._known_refs[str(node["ref"])] = {
+                    "role": str(node.get("role") or ""),
+                    "name": str(node.get("name") or ""),
+                }
+        return payload
+
+    def _fresh_snapshot(self) -> dict[str, Any]:
+        """A raw snapshot. Internal re-grounding never redefines the model's refs."""
+        return _web_action(
+            lambda: self.page.evaluate(SNAPSHOT_JS),
+            what="taking a snapshot",
+        )
+
+    def resolve(self, ref: str) -> ResolvedTarget:
+        """The control a ref names, re-grounding when the ref has gone stale."""
+        known = self._known_refs.get(ref)
+        current = self.page.locator(_ref_selector(ref))
+        if current.count() > 0:
+            actual = _element_identity(current.first)
+            if actual is not None and (known is None or _identity_matches(actual, known)):
+                return ResolvedTarget(
+                    requested_ref=ref,
+                    role=actual["role"],
+                    name=actual["name"],
+                    method="ref",
+                    ref=ref,
+                    locator=current.first,
+                )
+        if known is None:
             raise ToolError(
                 "not_found",
                 f"no element with ref '{ref}' on this page; take a new snapshot",
             )
-        return locator.first
+        replay = self._resolved_refs.get(ref)
+        if replay is not None:
+            replayed = self.page.locator(_ref_selector(replay))
+            if replayed.count() > 0:
+                actual = _element_identity(replayed.first)
+                if actual is not None and _identity_matches(actual, known):
+                    return ResolvedTarget(
+                        requested_ref=ref,
+                        role=known["role"],
+                        name=known["name"],
+                        method="replay",
+                        ref=replay,
+                        locator=replayed.first,
+                    )
+        return self._reground(ref, known["role"], known["name"])
+
+    def _reground(self, requested_ref: str, role: str, name: str) -> ResolvedTarget:
+        """Fresh snapshot, then re-resolve by role and accessible name."""
+        payload = self._fresh_snapshot()
+        match = _match_node(list(payload.get("nodes") or []), role, name)
+        if match is not None:
+            new_ref = str(match["ref"])
+            self._resolved_refs[requested_ref] = new_ref
+            return ResolvedTarget(
+                requested_ref=requested_ref,
+                role=role,
+                name=name,
+                method="snapshot",
+                ref=new_ref,
+                locator=self.page.locator(_ref_selector(new_ref)).first,
+            )
+        return self._vision_reground(requested_ref, role, name)
+
+    def _vision_reground(self, requested_ref: str, role: str, name: str) -> ResolvedTarget:
+        """Screenshot plus the vision model, for a control the tree lacks."""
+        if self._client is None:
+            raise ToolError(
+                "not_found",
+                f"no {role} named {name!r} is in the accessibility tree, and no "
+                "vision model is configured for the visual fallback",
+                data={"locator": {"role": role, "name": name, "method": "vision"}},
+            )
+        path = self.screenshot_path(f"reground-{role}-{name}")
+        _web_action(
+            lambda: self.page.screenshot(path=str(path), full_page=False),
+            what="taking a screenshot for the vision fallback",
+        )
+        viewport = self.page.viewport_size or {"width": 1280, "height": 900}
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        messages: list[Message] = [
+            {"role": "system", "content": VISION_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": vision_locate_prompt(
+                            role, name, width=viewport["width"], height=viewport["height"]
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                    },
+                ],
+            },
+        ]
+        turns: list[AssistantTurn] = []
+        try:
+            location = complete_structured(
+                self._client,
+                messages,
+                ElementLocation,
+                model_role="vision",
+                on_turn=turns.append,
+            )
+        except StructuredOutputError as exc:
+            raise ToolError(
+                "not_found",
+                f"the vision fallback could not locate the {role} named {name!r}: {exc}",
+                data={"locator": {"role": role, "name": name, "method": "vision"}},
+            ) from exc
+        usage, cost = _turns_cost(turns, self._prices)
+        if (
+            not location.found
+            or location.x is None
+            or location.y is None
+            or location.confidence < VISION_MIN_CONFIDENCE
+        ):
+            raise ToolError(
+                "not_found",
+                f"the vision fallback did not find the {role} named {name!r} on screen",
+                data={
+                    "locator": {"role": role, "name": name, "method": "vision"},
+                    "usage": usage,
+                    "cost_usd": cost,
+                },
+            )
+        point = (int(location.x), int(location.y))
+        element = _element_at(self.page, point)
+        if element is None:
+            raise ToolError(
+                "not_found",
+                f"the vision fallback pointed at ({point[0]}, {point[1]}), "
+                "where there is no element",
+                data={
+                    "locator": {
+                        "role": role,
+                        "name": name,
+                        "method": "vision",
+                        "point": list(point),
+                        "confidence": location.confidence,
+                    },
+                    "usage": usage,
+                    "cost_usd": cost,
+                },
+            )
+        return ResolvedTarget(
+            requested_ref=requested_ref,
+            role=role,
+            name=name,
+            method="vision",
+            element=element,
+            point=point,
+            confidence=location.confidence,
+            artifacts=(str(path),),
+            usage=usage,
+            cost_usd=cost,
+        )
 
     def screenshot_path(self, name: str | None = None) -> Path:
         if name:
@@ -297,10 +676,7 @@ class SnapshotTool(BrowserTool):
     }
 
     def run(self, args: dict[str, Any]) -> Observation:
-        payload = _web_action(
-            lambda: self.session.page.evaluate(SNAPSHOT_JS),
-            what="taking a snapshot",
-        )
+        payload = self.session.snapshot()
         nodes = list(payload.get("nodes") or [])
         refs = {node["ref"]: node for node in nodes if node.get("ref")}
         snapshot = _format_snapshot(nodes)
@@ -322,7 +698,11 @@ class SnapshotTool(BrowserTool):
 
 class ClickTool(BrowserTool):
     name = "browser.click"
-    description = "Click the element with the given ref from the latest snapshot."
+    description = (
+        "Click the element with the given ref from the latest snapshot. A stale "
+        "ref is re-grounded by role and name, and the vision fallback locates a "
+        "control the accessibility tree lacks."
+    )
     side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -335,22 +715,27 @@ class ClickTool(BrowserTool):
 
     def run(self, args: dict[str, Any]) -> Observation:
         ref = require_str(args, "ref")
-        locator = self.session.locator(ref)
-        _web_action(lambda: locator.click(), what=f"clicking {ref}")
+        target = self.session.resolve(ref)
+        _web_action(lambda: target.click(), what=f"clicking {ref}")
         _web_action(
             lambda: self.session.page.wait_for_load_state("load"),
             what="waiting for the page after the click",
         )
         return Observation(
             ok=True,
-            summary=f"Clicked {ref}",
-            data={"ref": ref, "url": self.session.page.url},
+            summary=_summary(f"Clicked {ref}", target),
+            data=target.journal_data(url=self.session.page.url),
+            artifacts=list(target.artifacts),
         )
 
 
 class TypeTool(BrowserTool):
     name = "browser.type"
-    description = "Fill a text field with the given ref. Optionally press Enter to submit."
+    description = (
+        "Fill a text field with the given ref, re-grounding a stale ref and "
+        "falling back to vision for a control the accessibility tree lacks. "
+        "Optionally press Enter to submit."
+    )
     side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -372,24 +757,28 @@ class TypeTool(BrowserTool):
         if not isinstance(text, str):
             raise ToolError("invalid", "missing required argument 'text'")
         submit = optional_bool(args, "submit", False)
-        locator = self.session.locator(ref)
-        _web_action(lambda: locator.fill(text), what=f"typing into {ref}")
+        target = self.session.resolve(ref)
+        _web_action(lambda: target.fill(text), what=f"typing into {ref}")
         if submit:
-            _web_action(lambda: locator.press("Enter"), what=f"submitting {ref}")
+            _web_action(lambda: target.press("Enter"), what=f"submitting {ref}")
             _web_action(
                 lambda: self.session.page.wait_for_load_state("load"),
                 what="waiting for the page after submit",
             )
         return Observation(
             ok=True,
-            summary=f"Typed {text!r} into {ref}",
-            data={"ref": ref, "text": text},
+            summary=_summary(f"Typed {text!r} into {ref}", target),
+            data=target.journal_data(text=text),
+            artifacts=list(target.artifacts),
         )
 
 
 class SelectTool(BrowserTool):
     name = "browser.select"
-    description = "Choose an option in a select field by its value, then by its label."
+    description = (
+        "Choose an option in a select field by its value, then by its label, "
+        "re-grounding a stale ref when the page changed."
+    )
     side_effect = True
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
@@ -404,10 +793,11 @@ class SelectTool(BrowserTool):
     def run(self, args: dict[str, Any]) -> Observation:
         ref = require_str(args, "ref")
         value = require_str(args, "value")
-        locator = self.session.locator(ref)
+        target = self.session.resolve(ref)
         options = _web_action(
-            lambda: locator.locator("option").evaluate_all(
-                "els => els.map((el) => ({value: el.value, label: el.text.trim()}))"
+            lambda: target.evaluate(
+                "el => Array.from(el.options || []).map((option) => "
+                "({value: option.value, label: option.text.trim()}))"
             ),
             what=f"reading options from {ref}",
         )
@@ -431,17 +821,21 @@ class SelectTool(BrowserTool):
                 "invalid",
                 f"{ref} has no option {value!r}; available values: {available}",
             )
-        _web_action(lambda: locator.select_option(value=match), what=f"selecting {value!r}")
+        _web_action(lambda: target.select_option(match), what=f"selecting {value!r}")
         return Observation(
             ok=True,
-            summary=f"Selected {match!r} in {ref}",
-            data={"ref": ref, "value": match},
+            summary=_summary(f"Selected {match!r} in {ref}", target),
+            data=target.journal_data(value=match),
+            artifacts=list(target.artifacts),
         )
 
 
 class ExtractTool(BrowserTool):
     name = "browser.extract"
-    description = "Extract text: a field's value or an element's text by ref, or the page text."
+    description = (
+        "Extract text: a field's value or an element's text by ref, or the page "
+        "text. A stale ref is re-grounded by role and name."
+    )
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -457,23 +851,22 @@ class ExtractTool(BrowserTool):
         ref = optional_str(args, "ref")
         page = self.session.page
         if ref:
-            locator = self.session.locator(ref)
-            text = _web_action(
-                lambda: locator.evaluate(
-                    "el => (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' "
-                    "|| el.tagName === 'SELECT') ? el.value : el.innerText"
-                ),
-                what=f"extracting {ref}",
+            target = self.session.resolve(ref)
+            text = _web_action(lambda: target.evaluate(EXTRACT_JS), what=f"extracting {ref}")
+            return Observation(
+                ok=True,
+                summary=_summary(f"Extracted {len(text)} characters from {ref}", target),
+                data=target.journal_data(text=text, url=page.url),
+                artifacts=list(target.artifacts),
             )
-        else:
-            text = _web_action(
-                lambda: page.inner_text("body"),
-                what="extracting the page text",
-            )
+        text = _web_action(
+            lambda: page.inner_text("body"),
+            what="extracting the page text",
+        )
         return Observation(
             ok=True,
-            summary=f"Extracted {len(text)} characters" + (f" from {ref}" if ref else ""),
-            data={"ref": ref, "text": text, "url": page.url},
+            summary=f"Extracted {len(text)} characters",
+            data={"ref": None, "text": text, "url": page.url},
         )
 
 

@@ -155,6 +155,10 @@ Screenshots are display evidence only.
 
 - Run store (SQLite): run state, checkpoints, observations, Evidence Pack index.
 - Action journal with idempotency keys: retries never repeat completed side effects.
+- Browser re-grounding: a stale ref is re-resolved against a fresh snapshot by role
+  and accessible name; a control the accessibility tree lacks is located by a
+  screenshot and the vision model. The locator an action used is recorded in the
+  Observation, and therefore in the journal, so a retry replays it.
 - Checkpointing: a failed run resumes from its last checkpoint.
 - Step and cost meters per run; the run stops at its limit.
 - Failures are scenario-driven and seeded, never random.

@@ -202,6 +202,23 @@ def text_turn(text: str, *, usage: Usage | None = None) -> AssistantTurn:
     return AssistantTurn(model="scripted", text=text, usage=usage or Usage())
 
 
+def location_turn(x: int, y: int, *, confidence: float = 0.9) -> AssistantTurn:
+    """The strict-schema JSON the scripted vision model replies with."""
+    return AssistantTurn(
+        model="deepseek-v4-flash-vision-exp",
+        text=json.dumps({"found": True, "x": x, "y": y, "confidence": confidence}),
+        usage=Usage(prompt_tokens=1200, completion_tokens=60),
+    )
+
+
+def ref_for(snapshot: Observation, *, role: str, name: str) -> str:
+    """The ref of the first snapshot node matching a role and a partial name."""
+    for ref, node in snapshot.data["refs"].items():
+        if node["role"] == role and name.lower() in node["name"].lower():
+            return ref
+    raise AssertionError(f"no {role} named {name!r} in:\n{snapshot.data['snapshot']}")
+
+
 def tool_turn(
     name: str,
     arguments: dict | None = None,
