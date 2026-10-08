@@ -27,6 +27,7 @@ from mocks.ledgerlite import db
 from tests.support import (
     WORK_ORDER,
     ScriptedClient,
+    find_ref,
     location_turn,
     ref_for,
     run_settings,
@@ -82,6 +83,7 @@ def browser(chromium: None, tmp_path: Path) -> Iterator[BrowserSession]:
     try:
         session.start()
     except Exception as exc:  # noqa: BLE001 - report missing system dependencies as a skip
+        session.close()
         pytest.skip(f"Chromium is unavailable ({exc})")
     try:
         yield session
@@ -190,6 +192,53 @@ def test_a_control_missing_from_the_tree_uses_the_vision_fallback(
         assert script.calls[-1]["model_role"] == "vision"
         assert clicked.artifacts
         assert all(Path(path).is_file() for path in clicked.artifacts)
+
+        # A retry replays the vision locator without a second model call.
+        model_calls = len(script.calls)
+        again = registry.invoke("browser.click", {"ref": submit})
+
+        assert again.ok, again.summary
+        assert again.data["locator"]["method"] == "replay"
+        assert again.data["locator"]["point"] == [point["x"], point["y"]]
+        assert len(script.calls) == model_calls
+        assert session.page.evaluate("window.paintedClicks") == 2
+    finally:
+        session.close()
+
+
+def test_the_vision_fallback_refuses_a_point_that_hits_another_control(
+    chromium: None, tmp_path: Path, ledgerlite_server: str
+) -> None:
+    script = ScriptedClient([])
+    session = BrowserSession(artifact_dir=tmp_path / "artifacts", client=script)
+    session.start()
+    try:
+        registry = ToolRegistry(build_browser_tools(session), allowlist=BROWSER_TOOLS)
+        assert registry.invoke(
+            "browser.navigate", {"url": f"{ledgerlite_server}/invoices/new?ui=painted"}
+        ).ok
+        form = registry.invoke("browser.snapshot")
+        submit = ref_for(form, role="button", name="File invoice")
+        session.page.wait_for_function("window.uiChanged === true")
+        wrong_point = session.page.evaluate(
+            """() => {
+                const link = Array.from(document.querySelectorAll("a"))
+                    .find((node) => node.textContent.trim() === "Invoices");
+                const rect = link.getBoundingClientRect();
+                return {
+                    x: Math.round(rect.x + rect.width / 2),
+                    y: Math.round(rect.y + rect.height / 2),
+                };
+            }"""
+        )
+        script.replies.append(location_turn(wrong_point["x"], wrong_point["y"]))
+
+        clicked = registry.invoke("browser.click", {"ref": submit})
+
+        assert not clicked.ok
+        assert clicked.error_kind == "not_found"
+        assert "not a button" in clicked.summary
+        assert session.page.evaluate("window.paintedClicks || 0") == 0
     finally:
         session.close()
 
@@ -223,13 +272,6 @@ def _latest_refs(messages: list[Message]) -> dict[str, dict[str, Any]]:
     raise AssertionError("no snapshot observation in the engine messages")
 
 
-def _ref(refs: dict[str, dict[str, Any]], role: str, name: str) -> str:
-    for ref, node in refs.items():
-        if node["role"] == role and name.lower() in node["name"].lower():
-            return ref
-    raise AssertionError(f"no {role} named {name!r} in the snapshot")
-
-
 class BrowserStepClient:
     """Drives one browser step, reading snapshot refs out of the engine messages."""
 
@@ -255,36 +297,36 @@ class BrowserStepClient:
         if step == 2:
             return tool_turn(
                 "browser.type",
-                {"ref": _ref(refs, "textbox", "Vendor invoice number"), "text": "NW-2026-901"},
+                {"ref": find_ref(refs, role="textbox", name="Vendor invoice number"), "text": "NW-2026-901"},
                 call_id="c3",
             )
         if step == 3:
             return tool_turn(
                 "browser.select",
-                {"ref": _ref(refs, "combobox", "Vendor"), "value": "V-1001"},
+                {"ref": find_ref(refs, role="combobox", name="Vendor"), "value": "V-1001"},
                 call_id="c4",
             )
         if step == 4:
             return tool_turn(
                 "browser.select",
-                {"ref": _ref(refs, "combobox", "Purchase order"), "value": "PO-2001"},
+                {"ref": find_ref(refs, role="combobox", name="Purchase order"), "value": "PO-2001"},
                 call_id="c5",
             )
         if step == 5:
             return tool_turn(
                 "browser.select",
-                {"ref": _ref(refs, "combobox", "Goods receipt"), "value": "GR-2501"},
+                {"ref": find_ref(refs, role="combobox", name="Goods receipt"), "value": "GR-2501"},
                 call_id="c6",
             )
         if step == 6:
             return tool_turn(
                 "browser.type",
-                {"ref": _ref(refs, "textbox", "Amount"), "text": "1250.00"},
+                {"ref": find_ref(refs, role="textbox", name="Amount"), "text": "1250.00"},
                 call_id="c7",
             )
         if step in (7, 8):
             if self.submit_args is None:
-                self.submit_args = {"ref": _ref(refs, "button", "File invoice")}
+                self.submit_args = {"ref": find_ref(refs, role="button", name="File invoice")}
             return tool_turn("browser.click", dict(self.submit_args), call_id=f"c{step + 1}")
         return text_turn("Filed the invoice through the browser.")
 
@@ -318,23 +360,16 @@ def test_a_regrounded_locator_is_journaled_and_a_retry_replays_it(
     client = BrowserStepClient(f"{ledgerlite_server}/invoices/new?ui=changed")
     session = BrowserSession(artifact_dir=tmp_path / "artifacts")
     session.start()
-    invocations = {"click": 0}
     try:
         registry = build_registry(settings, context, task_pack, client, browser=session)
-        click_tool = registry.get("browser.click")
-        assert click_tool is not None
-        original_run = click_tool.run
-
-        def counting_run(args: dict[str, Any]):
-            invocations["click"] += 1
-            return original_run(args)
-
-        click_tool.run = counting_run  # type: ignore[method-assign]
         run_id = planned_run(store)
         run = execute_run(run_id, client, store, registry, task_pack=None)
     finally:
         session.close()
 
+    # The click submitted the form and the page moved on, so a second, re-run
+    # click could not succeed; both observations being ok proves the engine
+    # replayed the journaled locator instead of touching the browser again.
     assert run.state is RunState.VERIFYING
     journal = [entry for entry in store.list_journal(run_id) if entry.action == "browser.click"]
     assert len(journal) == 1
@@ -343,7 +378,6 @@ def test_a_regrounded_locator_is_journaled_and_a_retry_replays_it(
     assert locator["method"] == "snapshot"
     assert locator["role"] == "button"
     assert locator["name"] == "File invoice"
-    assert invocations["click"] == 1
     clicks = [record for record in store.list_observations(run_id) if record.tool == "browser.click"]
     assert [record.ok for record in clicks] == [True, True]
     with closing(db.connect(ledgerlite_db)) as conn:

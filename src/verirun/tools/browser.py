@@ -22,6 +22,7 @@ import re
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar, Self
 
@@ -46,7 +47,7 @@ from verirun.config import ModelPrice
 from verirun.engine.models import Observation
 from verirun.engine.structured import StructuredOutputError, complete_structured
 from verirun.llm.client import AssistantTurn, LLMClient, Message
-from verirun.llm.meter import CostMeter
+from verirun.llm.meter import meter_turns
 from verirun.tools.base import Tool, ToolError, optional_bool, optional_str, require_str
 
 IDENTITY_JS = r"""
@@ -232,6 +233,11 @@ def _identity_matches(actual: dict[str, str], known: dict[str, str]) -> bool:
     )
 
 
+def _name_matches(actual: str, wanted: str) -> bool:
+    actual, wanted = actual.strip().casefold(), wanted.strip().casefold()
+    return actual == wanted or (bool(wanted) and wanted in actual)
+
+
 def _match_node(nodes: list[dict[str, Any]], role: str, name: str) -> dict[str, Any] | None:
     """The interactive node that re-grounds a target by role and name.
 
@@ -257,9 +263,7 @@ def _match_node(nodes: list[dict[str, Any]], role: str, name: str) -> dict[str, 
 def _turns_cost(
     turns: list[AssistantTurn], prices: dict[str, ModelPrice]
 ) -> tuple[dict[str, Any], float]:
-    meter = CostMeter(prices)
-    for turn in turns:
-        meter.add(turn.model, turn.usage)
+    meter = meter_turns(prices, turns)
     return meter.snapshot(), meter.total_usd
 
 
@@ -275,21 +279,51 @@ def _element_at(page: Page, point: tuple[int, int]) -> ElementHandle | None:
     return handle.as_element()
 
 
+def _try_element_at(page: Page, point: tuple[int, int]) -> ElementHandle | None:
+    try:
+        return _element_at(page, point)
+    except ToolError:
+        return None
+
+
+def _vision_mismatch(element: ElementHandle, role: str, name: str) -> str | None:
+    """How the element at a vision point contradicts the wanted control, if it does."""
+    try:
+        payload = element.evaluate(ELEMENT_IDENTITY_JS)
+    except PlaywrightError:
+        return None
+    actual = payload if isinstance(payload, dict) else {}
+    actual_role = str(actual.get("role") or "")
+    actual_name = str(actual.get("name") or "")
+    if actual_role and actual_role != role:
+        return f"the element there is a {actual_role}, not a {role}"
+    if actual_name and not _name_matches(actual_name, name):
+        return f"the element there is named {actual_name!r}, not {name!r}"
+    return None
+
+
+class ResolveMethod(StrEnum):
+    """How a browser action resolved its target."""
+
+    REF = "ref"
+    REPLAY = "replay"
+    SNAPSHOT = "snapshot"
+    VISION = "vision"
+
+
 @dataclass(frozen=True)
 class ResolvedTarget:
     """One resolved browser control, ready for an action.
 
-    ``method`` says how it was resolved: ``ref`` (the requested ref was still
-    current), ``replay`` (a locator resolved earlier for the same ref),
-    ``snapshot`` (a fresh snapshot matched the role and accessible name), or
-    ``vision`` (the accessibility tree did not contain it and the vision model
-    located it on screen).
+    ``method`` says how it was resolved: the requested ref was still current,
+    a locator resolved earlier was replayed, a fresh snapshot matched the role
+    and accessible name, or the vision model located it on screen.
     """
 
     requested_ref: str
     role: str
     name: str
-    method: str
+    method: ResolveMethod
     ref: str | None = None
     locator: Locator | None = None
     element: ElementHandle | None = None
@@ -301,7 +335,7 @@ class ResolvedTarget:
 
     @property
     def regrounded(self) -> bool:
-        return self.method != "ref"
+        return self.method is not ResolveMethod.REF
 
     @property
     def handle(self) -> Locator | ElementHandle:
@@ -330,7 +364,7 @@ class ResolvedTarget:
         locator: dict[str, Any] = {
             "role": self.role,
             "name": self.name,
-            "method": self.method,
+            "method": self.method.value,
         }
         if self.ref is not None:
             locator["ref"] = self.ref
@@ -353,7 +387,7 @@ class ResolvedTarget:
 
 def _summary(text: str, target: ResolvedTarget) -> str:
     if target.regrounded:
-        return f"{text} (re-grounded via {target.method})"
+        return f"{text} (re-grounded via {target.method.value})"
     return text
 
 
@@ -381,6 +415,7 @@ class BrowserSession:
         self._screenshots = 0
         self._known_refs: dict[str, dict[str, str]] = {}
         self._resolved_refs: dict[str, str] = {}
+        self._vision_locators: dict[str, tuple[str, int, int, float]] = {}
 
     def start(self) -> BrowserSession:
         if self._page is not None:
@@ -463,7 +498,7 @@ class BrowserSession:
                     requested_ref=ref,
                     role=actual["role"],
                     name=actual["name"],
-                    method="ref",
+                    method=ResolveMethod.REF,
                     ref=ref,
                     locator=current.first,
                 )
@@ -482,7 +517,7 @@ class BrowserSession:
                         requested_ref=ref,
                         role=known["role"],
                         name=known["name"],
-                        method="replay",
+                        method=ResolveMethod.REPLAY,
                         ref=replay,
                         locator=replayed.first,
                     )
@@ -499,14 +534,34 @@ class BrowserSession:
                 requested_ref=requested_ref,
                 role=role,
                 name=name,
-                method="snapshot",
+                method=ResolveMethod.SNAPSHOT,
                 ref=new_ref,
                 locator=self.page.locator(_ref_selector(new_ref)).first,
             )
         return self._vision_reground(requested_ref, role, name)
 
     def _vision_reground(self, requested_ref: str, role: str, name: str) -> ResolvedTarget:
-        """Screenshot plus the vision model, for a control the tree lacks."""
+        """Screenshot plus the vision model, for a control the tree lacks.
+
+        A locator the vision fallback resolved before is replayed while the page
+        URL is unchanged, so a retry touches the same point without another
+        model call.
+        """
+        cached = self._vision_locators.get(requested_ref)
+        if cached is not None and cached[0] == self.page.url:
+            point = (cached[1], cached[2])
+            element = _try_element_at(self.page, point)
+            if element is not None and _vision_mismatch(element, role, name) is None:
+                return ResolvedTarget(
+                    requested_ref=requested_ref,
+                    role=role,
+                    name=name,
+                    method=ResolveMethod.REPLAY,
+                    element=element,
+                    point=point,
+                    confidence=cached[3],
+                )
+            self._vision_locators.pop(requested_ref, None)
         if self._client is None:
             raise ToolError(
                 "not_found",
@@ -572,11 +627,12 @@ class BrowserSession:
             )
         point = (int(location.x), int(location.y))
         element = _element_at(self.page, point)
-        if element is None:
+        mismatch = None if element is None else _vision_mismatch(element, role, name)
+        if element is None or mismatch is not None:
+            problem = "where there is no element" if element is None else f"but {mismatch}"
             raise ToolError(
                 "not_found",
-                f"the vision fallback pointed at ({point[0]}, {point[1]}), "
-                "where there is no element",
+                f"the vision fallback pointed at ({point[0]}, {point[1]}), {problem}",
                 data={
                     "locator": {
                         "role": role,
@@ -589,11 +645,17 @@ class BrowserSession:
                     "cost_usd": cost,
                 },
             )
+        self._vision_locators[requested_ref] = (
+            self.page.url,
+            point[0],
+            point[1],
+            location.confidence,
+        )
         return ResolvedTarget(
             requested_ref=requested_ref,
             role=role,
             name=name,
-            method="vision",
+            method=ResolveMethod.VISION,
             element=element,
             point=point,
             confidence=location.confidence,

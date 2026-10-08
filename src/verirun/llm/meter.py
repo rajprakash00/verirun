@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 
 from verirun.config import ModelPrice
-from verirun.llm.client import Usage
+from verirun.llm.client import AssistantTurn, Usage
 
 
 class CostMeter:
@@ -49,3 +50,11 @@ class CostMeter:
             "by_model": {model: round(cost, 6) for model, cost in self.by_model.items()},
             "unknown_models": sorted(self.unknown_models),
         }
+
+
+def meter_turns(prices: dict[str, ModelPrice], turns: Iterable[AssistantTurn]) -> CostMeter:
+    """A meter with every model turn already counted."""
+    meter = CostMeter(prices)
+    for turn in turns:
+        meter.add(turn.model, turn.usage)
+    return meter

@@ -204,8 +204,9 @@ Each decision and its trade-offs is recorded as an ADR in
 | --- | --- |
 | [0001](docs/adr/0001-vendor-write-tool-and-verifier-check.md) | Generic vendor write tool and vendor verification check, so a second Task Pack needs no engine change. |
 | [0002](docs/adr/0002-custom-engine-over-a-framework.md) | A custom state machine over an agent framework: the escalation ladder, approval gates, idempotent journal, and verification phase are first-class. |
-| [0003](docs/adr/0003-accessibility-tree-browser-control.md) | Accessibility-tree snapshots with stable refs over vision-first browser control; vision is reserved for scanned documents. |
+| [0003](docs/adr/0003-accessibility-tree-browser-control.md) | Accessibility-tree snapshots with stable refs over vision-first browser control; vision is reserved for what the tree cannot serve. |
 | [0004](docs/adr/0004-replay-brain-for-deterministic-tests.md) | A provider-agnostic client with record/replay fixtures and a scripted test client, so tests are deterministic, offline, and free. |
+| [0005](docs/adr/0005-browser-regrounding.md) | Browser re-grounding: a stale ref is re-resolved by role and name, a control the tree lacks goes to the vision fallback, and the locator used is journaled. |
 
 ## Models and APIs
 
@@ -246,11 +247,12 @@ the Company Context change.
 
 ## Known limitations
 
-- Browser control depends on the last snapshot's refs; a UI change that
-  invalidates them fails the Step unless the model takes a fresh snapshot, and
-  automatic re-grounding is not built yet.
-- No native desktop GUI control; only the browser is driven, and only through
-  the accessibility tree and file tools.
+- Browser control prefers the accessibility tree. A UI change invalidates refs,
+  but the tool re-grounds a stale ref by role and accessible name and falls back
+  to the vision model for a control the tree lacks; canvas-only or unlabeled
+  widgets remain the hardest case.
+- No native desktop GUI control; only the browser is driven — through the
+  accessibility tree with a vision fallback — and the file tools.
 - No real external systems, credentials, payments, email sending, or network
   writes — all effects are simulated in the Mock Suite.
 - No authentication, multi-tenancy, or cloud deployment; the dashboard binds to
@@ -270,19 +272,15 @@ With two more weeks, in priority order:
    every change, and score task success, recovery rate, human interventions per
    Run, steps, and cost. The tests lock outcomes today, but no aggregate quality
    signal guards prompt, model, or Task Pack edits.
-2. **Browser re-grounding.** When a click or type fails because the UI changed,
-   take a fresh snapshot and re-resolve the target by role and name. Add a
-   vision fallback for canvas or image-only widgets, and journal the working
-   locator so retries stay idempotent.
-3. **A company-memory write path.** After each verified Run, propose a
+2. **A company-memory write path.** After each verified Run, propose a
    structured precedent (vendor quirks, working selectors, mismatch
    resolutions). A human approves it. Resolve and Plan then retrieve the top few
    precedents per Request. Memory stays static until this path exists.
-4. **A trace-to-Task-Pack compiler.** Draft a Task Pack from a verified Run's
+3. **A trace-to-Task-Pack compiler.** Draft a Task Pack from a verified Run's
    journal: goal template, tool allowlist, approval rules, verification
    contract. A human reviews the draft. This lowers a new kind of work from a
    hand-written pack and check to a review.
-5. **Production hardening, after the above.** A Postgres-backed queue with
+4. **Production hardening, after the above.** A Postgres-backed queue with
    scheduling, authentication and tenancy, a secrets vault, per-tool capability
    scopes, and OpenTelemetry audit export.
 

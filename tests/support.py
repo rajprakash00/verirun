@@ -211,12 +211,20 @@ def location_turn(x: int, y: int, *, confidence: float = 0.9) -> AssistantTurn:
     )
 
 
-def ref_for(snapshot: Observation, *, role: str, name: str) -> str:
-    """The ref of the first snapshot node matching a role and a partial name."""
-    for ref, node in snapshot.data["refs"].items():
+def find_ref(refs: dict[str, dict], *, role: str, name: str) -> str:
+    """The ref of the first node matching a role and a partial accessible name."""
+    for ref, node in refs.items():
         if node["role"] == role and name.lower() in node["name"].lower():
             return ref
-    raise AssertionError(f"no {role} named {name!r} in:\n{snapshot.data['snapshot']}")
+    raise AssertionError(f"no {role} named {name!r} in the snapshot")
+
+
+def ref_for(snapshot: Observation, *, role: str, name: str) -> str:
+    """The ref of the first snapshot node matching a role and a partial name."""
+    try:
+        return find_ref(snapshot.data["refs"], role=role, name=name)
+    except AssertionError as exc:
+        raise AssertionError(f"{exc}:\n{snapshot.data['snapshot']}") from exc
 
 
 def tool_turn(
