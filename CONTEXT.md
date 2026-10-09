@@ -28,6 +28,8 @@ Shared vocabulary for this project. A glossary only. No implementation details.
 
 **Observation** — the result of one Tool call.
 
+**Re-grounding** — recovering a browser control whose reference has gone stale: Verirun takes a fresh snapshot, finds the control again by role and accessible name, and falls back to the vision model when the accessibility tree lacks it. The locator it used is recorded so a retry touches the same control.
+
 **Verifier** — the part that checks the result of a Run against real system state. Separate from the doer. Does not trust messages or screens.
 
 **Evidence Pack** — the output of a Run: result, proof, action log, open questions.

@@ -27,7 +27,7 @@ from verirun.config import ModelPrice
 from verirun.engine.models import Observation
 from verirun.engine.structured import StructuredOutputError, complete_structured
 from verirun.llm.client import AssistantTurn, LLMClient, Message
-from verirun.llm.meter import CostMeter
+from verirun.llm.meter import meter_turns
 from verirun.tools.base import ToolError, require_str
 from verirun.tools.erp import parse_amount
 from verirun.tools.files import FileTool, read_pdf_text
@@ -336,9 +336,7 @@ class ExtractInvoiceTool(FileTool):
     def _base_data(
         self, relative: str, images: list[bytes], turns: list[AssistantTurn]
     ) -> dict[str, Any]:
-        meter = CostMeter(self.prices)
-        for turn in turns:
-            meter.add(turn.model, turn.usage)
+        meter = meter_turns(self.prices, turns)
         return {
             "path": relative,
             "method": "vision",

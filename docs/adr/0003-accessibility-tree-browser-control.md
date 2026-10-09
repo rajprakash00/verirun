@@ -55,8 +55,11 @@ Control the browser through the accessibility tree with deterministic refs
 - The executor can review and cite exactly which labeled control it used, and
   the Evidence Pack can show the screenshot it captured.
 - Pages with poor semantics (unlabeled controls, custom widgets, canvas) are
-  harder or impossible to drive; this is a documented limitation, not a silent
-  failure — a missing ref surfaces as a `not_found` observation the model can
-  adapt to.
-- Refs are page-scoped. The model must snapshot after every navigation, which
-  the tool descriptions and the Execute prompt state explicitly.
+  harder to drive; a stale ref is re-grounded from a fresh snapshot by role and
+  accessible name, and a control the tree lacks goes to the vision fallback
+  (ticket #30). When even that fails, the failure surfaces as a `not_found`
+  observation the model can adapt to — a documented limitation, not a silent
+  failure.
+- Refs are page-scoped. The model should snapshot after every navigation, which
+  the tool descriptions and the Execute prompt state explicitly; if it does not,
+  the tool re-grounds the ref instead of failing immediately.

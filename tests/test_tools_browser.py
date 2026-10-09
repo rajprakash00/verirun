@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from mocks.ledgerlite import db
-from verirun.engine.models import Observation
+from tests.support import ref_for
 from verirun.tools import BrowserSession, ToolRegistry, build_browser_tools
 
 BROWSER_TOOLS = [
@@ -47,13 +47,6 @@ def browser(tmp_path: Path) -> Iterator[BrowserSession]:
 @pytest.fixture
 def registry(browser: BrowserSession) -> ToolRegistry:
     return ToolRegistry(build_browser_tools(browser), allowlist=BROWSER_TOOLS)
-
-
-def ref_for(snapshot: Observation, *, role: str, name: str) -> str:
-    for ref, node in snapshot.data["refs"].items():
-        if node["role"] == role and name.lower() in node["name"].lower():
-            return ref
-    raise AssertionError(f"no {role} named {name!r} in:\n{snapshot.data['snapshot']}")
 
 
 def test_scripted_browser_sequence_files_an_invoice(
@@ -200,17 +193,17 @@ def test_a_new_snapshot_clears_stale_refs(
     assert clicked.data["url"].endswith("/invoices")
 
 
-def test_a_ref_from_a_previous_page_is_not_found(
+def test_a_ref_whose_control_is_gone_is_not_found(
     registry: ToolRegistry, ledgerlite_server: str
 ) -> None:
-    assert registry.invoke("browser.navigate", {"url": f"{ledgerlite_server}/"}).ok
-    dashboard = registry.invoke("browser.snapshot")
-    stale = ref_for(dashboard, role="link", name="Invoices")
     assert registry.invoke(
         "browser.navigate", {"url": f"{ledgerlite_server}/invoices/new"}
     ).ok
+    form = registry.invoke("browser.snapshot")
+    submit = ref_for(form, role="button", name="File invoice")
+    assert registry.invoke("browser.navigate", {"url": f"{ledgerlite_server}/invoices"}).ok
 
-    clicked = registry.invoke("browser.click", {"ref": stale})
+    clicked = registry.invoke("browser.click", {"ref": submit})
 
     assert not clicked.ok
     assert clicked.error_kind == "not_found"

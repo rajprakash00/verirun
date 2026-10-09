@@ -71,9 +71,14 @@ def live_registry(
     One browser session is scoped to the Run and writes its artifacts into the
     Run's evidence directory. Chromium starts on the first browser.* call, so a
     Run that never touches the browser neither pays for it nor needs it
-    installed. The session closes when the Run returns.
+    installed. The session carries the LLM client for the vision fallback, and
+    closes when the Run returns.
     """
-    session = BrowserSession(artifact_dir=settings.run_db.parent / run_id)
+    session = BrowserSession(
+        artifact_dir=settings.run_db.parent / run_id,
+        client=client,
+        prices=settings.prices,
+    )
     try:
         yield build_registry(settings, context, task_pack, client, browser=session)
     finally:
