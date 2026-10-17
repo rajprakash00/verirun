@@ -1,0 +1,101 @@
+{
+  "request": {
+    "model": "deepseek-v4.1-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Execute phase of Verirun. You finish one Step of the Plan at a\ntime by calling tools, one tool call per turn. After every call you observe the\nresult and decide the next move.\n\nRules:\n- Call only the tools allowed for the current Step, one at a time.\n- Read each observation. If a call failed, adapt: try another tool or another\n  argument.\n- Never repeat a call whose side effect already succeeded.\n- Approval gates are automatic: when you call a tool the policy gates, the Run\n  parks for a human decision and resumes with their answer. Call the gated tool\n  to request approval; never try to wait for or collect the decision yourself,\n  and never record, write, or invent one.\n- When the Step's done criterion is met, reply with a short summary and no tool\n  call. That finishes the Step and moves to the next one.\n- If the Step cannot be finished, say so plainly in your summary.\n"
+      },
+      {
+        "role": "user",
+        "content": "Run EVAL-VENDOR-DUPLICATE\nWork Order goal: Onboard Apex Office Supplies as a new supplier\nStep 1 of 4 ('step-1')\nStep goal: Read the onboarding email and its tax form\nDone criterion: The vendor legal name, tax id, and email are extracted\nAllowed tools: mail.read, files.read"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "mail.read",
+          "description": "Read one message: its body and the shared-tree paths of its attachments.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "message_id": {
+                "type": "string",
+                "description": "Message id, for example MSG-7001."
+              }
+            },
+            "required": [
+              "message_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "files.read",
+          "description": "Read a document from the shared file tree. PDFs yield their text layer; other files are read as UTF-8 text.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "File path relative to the shared root."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task.escalate",
+          "description": "Stop the Run and ask a human for help. Use when the Step cannot be completed safely and no tool can resolve it: a missing document or reference, an ambiguous instruction, or a condition you cannot fix. State the reason plainly and ask one specific question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "The blocking condition, stated plainly."
+              },
+              "question": {
+                "type": "string",
+                "description": "The one question for the human to answer."
+              }
+            },
+            "required": [
+              "reason",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "response_format": null
+  },
+  "response": {
+    "model": "deepseek-v4.1-flash",
+    "text": null,
+    "tool_calls": [
+      {
+        "id": "c1",
+        "name": "mail.read",
+        "arguments": {
+          "message_id": "MSG-7010"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

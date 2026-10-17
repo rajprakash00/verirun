@@ -1,0 +1,156 @@
+{
+  "request": {
+    "model": "deepseek-v4.1-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Execute phase of Verirun. You finish one Step of the Plan at a\ntime by calling tools, one tool call per turn. After every call you observe the\nresult and decide the next move.\n\nRules:\n- Call only the tools allowed for the current Step, one at a time.\n- Read each observation. If a call failed, adapt: try another tool or another\n  argument.\n- Never repeat a call whose side effect already succeeded.\n- Approval gates are automatic: when you call a tool the policy gates, the Run\n  parks for a human decision and resumes with their answer. Call the gated tool\n  to request approval; never try to wait for or collect the decision yourself,\n  and never record, write, or invent one.\n- When the Step's done criterion is met, reply with a short summary and no tool\n  call. That finishes the Step and moves to the next one.\n- If the Step cannot be finished, say so plainly in your summary.\n"
+      },
+      {
+        "role": "user",
+        "content": "Run EVAL-UI-CHANGED\nWork Order goal: File the Northwind invoice after checking the LedgerLite form\nStep 1 of 4 ('step-1')\nStep goal: Check the LedgerLite new-invoice form through the browser UI\nDone criterion: The form accepts NW-2026-001 despite the UI change\nAllowed tools: browser.navigate, browser.snapshot, browser.type, browser.extract"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {
+              "name": "browser.navigate",
+              "arguments": "{\"url\": \"http://127.0.0.1:8002/invoices/new?ui=changed\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "{\"ok\":true,\"summary\":\"Navigated to http://127.0.0.1:8002/invoices/new?ui=changed (LedgerLite \u2014 New invoice)\",\"data\":{\"url\":\"http://127.0.0.1:8002/invoices/new?ui=changed\",\"title\":\"LedgerLite \u2014 New invoice\",\"status\":200},\"error_kind\":null,\"artifacts\":[]}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "browser.navigate",
+          "description": "Open an absolute http(s) URL in the browser and wait for the page to load.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Absolute http(s) URL to open."
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "browser.snapshot",
+          "description": "Take an accessibility snapshot of the current page. Interactive elements carry stable refs to pass to click, type, select, and extract.",
+          "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "browser.type",
+          "description": "Fill a text field with the given ref, re-grounding a stale ref and falling back to vision for a control the accessibility tree lacks. Optionally press Enter to submit.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "description": "Element ref from browser.snapshot."
+              },
+              "text": {
+                "type": "string",
+                "description": "Text to fill into the field."
+              },
+              "submit": {
+                "type": "boolean",
+                "description": "Press Enter after filling. Defaults to false."
+              }
+            },
+            "required": [
+              "ref",
+              "text"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "browser.extract",
+          "description": "Extract text: a field's value or an element's text by ref, or the page text. A stale ref is re-grounded by role and name.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "description": "Optional element ref from browser.snapshot. Omit for page text."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task.escalate",
+          "description": "Stop the Run and ask a human for help. Use when the Step cannot be completed safely and no tool can resolve it: a missing document or reference, an ambiguous instruction, or a condition you cannot fix. State the reason plainly and ask one specific question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "The blocking condition, stated plainly."
+              },
+              "question": {
+                "type": "string",
+                "description": "The one question for the human to answer."
+              }
+            },
+            "required": [
+              "reason",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "response_format": null
+  },
+  "response": {
+    "model": "deepseek-v4.1-flash",
+    "text": null,
+    "tool_calls": [
+      {
+        "id": "c2",
+        "name": "browser.snapshot",
+        "arguments": {}
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

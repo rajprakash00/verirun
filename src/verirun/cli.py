@@ -39,6 +39,46 @@ def build_parser() -> argparse.ArgumentParser:
     report = subparsers.add_parser("report", help="render the Evidence Pack for a Run")
     report.add_argument("run_id", help="Run id")
 
+    eval_parser = subparsers.add_parser(
+        "eval", help="run the seeded scenarios in replay mode and write a report"
+    )
+    eval_parser.add_argument(
+        "--report",
+        type=Path,
+        default=Path("runs/eval/report.json"),
+        help="where to write the JSON report (default runs/eval/report.json)",
+    )
+    eval_parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=Path("mocks/state"),
+        help="directory holding the seeded mock databases (default mocks/state)",
+    )
+    eval_parser.add_argument(
+        "--shared",
+        type=Path,
+        default=Path("shared"),
+        help="shared file tree the Runs read and write (default shared)",
+    )
+    eval_parser.add_argument(
+        "--runs",
+        type=Path,
+        default=Path("runs/eval"),
+        help="directory for the eval's runs and evidence (default runs/eval)",
+    )
+    eval_parser.add_argument(
+        "--fixtures",
+        type=Path,
+        default=Path("evals/fixtures/llm"),
+        help="recorded fixtures the replay client serves (default evals/fixtures/llm)",
+    )
+    eval_parser.add_argument(
+        "--browser",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="run the browser re-grounding scenario (needs Chromium)",
+    )
+
     return parser
 
 
@@ -55,6 +95,8 @@ def main(
         return _serve_command(args, settings)
     if args.command == "report":
         return _report_command(args, settings)
+    if args.command == "eval":
+        return _eval_command(args)
     return 0
 
 
@@ -136,6 +178,29 @@ def _report_command(args: argparse.Namespace, settings: Settings | None) -> int:
     print(f"Evidence Pack written to {path}")
     print(f"Evidence Pack HTML written to {path.with_suffix('.html')}")
     return 0 if run.state is RunState.COMPLETED else 1
+
+
+def _eval_command(args: argparse.Namespace) -> int:
+    from verirun.eval import format_report, run_eval, write_report
+
+    settings = Settings(
+        _env_file=None,
+        llm_mode="replay",
+        fixture_dir=args.fixtures,
+        run_db=args.runs / "verirun.db",
+        shared_dir=args.shared,
+        mail_db=args.state_dir / "maildesk.db",
+        erp_db=args.state_dir / "ledgerlite.db",
+    )
+    try:
+        report = run_eval(settings, browser=args.browser)
+        report_path = write_report(report, args.report)
+    except Exception as exc:  # noqa: BLE001 - the CLI reports any eval failure and exits cleanly
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(format_report(report))
+    print(f"Report written to {report_path}")
+    return 0 if report.passed else 1
 
 
 def format_run(

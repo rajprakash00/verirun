@@ -1,0 +1,101 @@
+{
+  "request": {
+    "model": "deepseek-v4.1-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Execute phase of Verirun. You finish one Step of the Plan at a\ntime by calling tools, one tool call per turn. After every call you observe the\nresult and decide the next move.\n\nRules:\n- Call only the tools allowed for the current Step, one at a time.\n- Read each observation. If a call failed, adapt: try another tool or another\n  argument.\n- Never repeat a call whose side effect already succeeded.\n- Approval gates are automatic: when you call a tool the policy gates, the Run\n  parks for a human decision and resumes with their answer. Call the gated tool\n  to request approval; never try to wait for or collect the decision yourself,\n  and never record, write, or invent one.\n- When the Step's done criterion is met, reply with a short summary and no tool\n  call. That finishes the Step and moves to the next one.\n- If the Step cannot be finished, say so plainly in your summary.\n"
+      },
+      {
+        "role": "user",
+        "content": "Run EVAL-MISSING-PO\nWork Order goal: Match the Bright Path Consulting invoice to a purchase order\nStep 1 of 1 ('step-1')\nStep goal: Match the Bright Path invoice to a purchase order\nDone criterion: The matching purchase order is known\nAllowed tools: erp.list_purchase_orders"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "c1",
+            "type": "function",
+            "function": {
+              "name": "erp.list_purchase_orders",
+              "arguments": "{\"vendor_id\": \"V-1004\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "{\"ok\":true,\"summary\":\"Listed 0 purchase order(s)\",\"data\":{\"purchase_orders\":[]},\"error_kind\":null,\"artifacts\":[]}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.list_purchase_orders",
+          "description": "List purchase orders in LedgerLite, optionally filtered by vendor or status.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "vendor_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "description": "open, closed, or cancelled."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task.escalate",
+          "description": "Stop the Run and ask a human for help. Use when the Step cannot be completed safely and no tool can resolve it: a missing document or reference, an ambiguous instruction, or a condition you cannot fix. State the reason plainly and ask one specific question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "The blocking condition, stated plainly."
+              },
+              "question": {
+                "type": "string",
+                "description": "The one question for the human to answer."
+              }
+            },
+            "required": [
+              "reason",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "response_format": null
+  },
+  "response": {
+    "model": "deepseek-v4.1-flash",
+    "text": null,
+    "tool_calls": [
+      {
+        "id": "c2",
+        "name": "task.escalate",
+        "arguments": {
+          "reason": "Invoice BP-2026-123 has no purchase order in LedgerLite",
+          "question": "Which purchase order covers BP-2026-123?"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

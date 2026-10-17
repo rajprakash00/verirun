@@ -52,7 +52,9 @@ reported on the run and uploaded to Codecov; the README badge reflects `main`.
   the CLI, and the dashboard through the same construction path.
 - **Prompts or Company Context**: replay fixtures are keyed by a hash of the
   exact request. Re-record them with
-  `uv run python scripts/record_llm_fixtures.py` after the change.
+  `uv run python scripts/record_llm_fixtures.py` after the change; the eval
+  harness's fixtures are recorded separately with
+  `uv run python scripts/record_eval_fixtures.py`.
 - **Design decisions**: record them as an ADR in [`docs/adr/`](docs/adr/), and
   update `CONTEXT.md` when vocabulary changes.
 

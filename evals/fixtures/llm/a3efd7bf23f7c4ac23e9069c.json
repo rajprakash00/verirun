@@ -1,0 +1,29 @@
+{
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Plan phase of Verirun. You turn a Work Order into an ordered plan\nof Steps. You never act and never call tools.\n\nReturn a single JSON object:\n{\n  \"steps\": [\n    {\n      \"id\": string,\n      \"goal\": string,\n      \"allowed_tools\": [string],\n      \"done_criterion\": string\n    }\n  ]\n}\n\nRules:\n- Each Step is one piece of work, ordered from first to last.\n- \"allowed_tools\" may only contain tool names from the Task Pack allowlist. Use\n  the smallest set of tools that can finish the Step.\n- The plan must cover every success criterion in the Work Order and follow the SOP.\n- Approval gates are engine mechanics, not Steps: plan the gated action itself,\n  for example scheduling an over-limit payment. Calling it parks the Run for a\n  human decision automatically, and the Run resumes with the answer. Never plan\n  a Step whose work is waiting for, collecting, or recording a human decision.\n- \"id\" is a short unique slug, for example \"step-1\", numbered in order.\n- \"done_criterion\" is a checkable statement that says when the Step is finished.\n- Reply with JSON only: no prose, no markdown.\n"
+      },
+      {
+        "role": "user",
+        "content": "Work Order (JSON):\n{\n  \"sop\": \"invoice-processing\",\n  \"goal\": \"File the Riverstone Logistics invoice from the September batch\",\n  \"assumptions\": [\n    \"Only the September requests in scope are handled\"\n  ],\n  \"systems\": [\n    \"maildesk\",\n    \"ledgerlite\",\n    \"files\"\n  ],\n  \"policies\": [\n    \"spend-limits\",\n    \"action-rules\"\n  ],\n  \"approval_gates\": [\n    {\n      \"id\": \"over-spend-limit\",\n      \"description\": \"Payments above 10,000 USD wait for a human\",\n      \"policy\": \"spend-limits\"\n    }\n  ],\n  \"success_criteria\": [\n    \"Invoice RS-2026-088 exists in LedgerLite\"\n  ],\n  \"open_questions\": []\n}\n\nTool allowlist:\n[\n  \"mail.list\",\n  \"mail.read\",\n  \"mail.mark_read\",\n  \"files.list\",\n  \"files.read\",\n  \"files.extract\",\n  \"files.write\",\n  \"files.move\",\n  \"files.archive\",\n  \"browser.navigate\",\n  \"browser.snapshot\",\n  \"browser.click\",\n  \"browser.type\",\n  \"browser.select\",\n  \"browser.extract\",\n  \"browser.screenshot\",\n  \"erp.list_vendors\",\n  \"erp.get_vendor\",\n  \"erp.list_purchase_orders\",\n  \"erp.get_purchase_order\",\n  \"erp.get_goods_receipt\",\n  \"erp.list_invoices\",\n  \"erp.get_invoice\",\n  \"erp.file_invoice\",\n  \"erp.schedule_payment\"\n]\n\nSOP id: invoice-processing\n\nTask Pack goal template: Turn supplier invoice requests from the AP mailbox into validated invoices filed in LedgerLite, with payments prepared and any required human approval obtained. Request: {request}"
+      }
+    ],
+    "tools": [],
+    "response_format": {
+      "type": "json_object"
+    }
+  },
+  "response": {
+    "model": "deepseek-v4-pro",
+    "text": "{\"steps\": [{\"id\": \"step-1\", \"goal\": \"Validate the Riverstone invoice against its references\", \"allowed_tools\": [\"erp.get_purchase_order\", \"erp.get_goods_receipt\"], \"done_criterion\": \"The amount agrees with the PO and goods receipt\"}, {\"id\": \"step-2\", \"goal\": \"File the Riverstone invoice and schedule payment\", \"allowed_tools\": [\"erp.file_invoice\", \"erp.schedule_payment\"], \"done_criterion\": \"RS-2026-088 is filed and the payment scheduled\"}, {\"id\": \"step-3\", \"goal\": \"Archive the source document\", \"allowed_tools\": [\"files.archive\"], \"done_criterion\": \"The source is in processed\"}]}",
+    "tool_calls": [],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

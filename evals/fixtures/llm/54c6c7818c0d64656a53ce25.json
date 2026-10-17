@@ -1,0 +1,137 @@
+{
+  "request": {
+    "model": "deepseek-v4.1-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Execute phase of Verirun. You finish one Step of the Plan at a\ntime by calling tools, one tool call per turn. After every call you observe the\nresult and decide the next move.\n\nRules:\n- Call only the tools allowed for the current Step, one at a time.\n- Read each observation. If a call failed, adapt: try another tool or another\n  argument.\n- Never repeat a call whose side effect already succeeded.\n- Approval gates are automatic: when you call a tool the policy gates, the Run\n  parks for a human decision and resumes with their answer. Call the gated tool\n  to request approval; never try to wait for or collect the decision yourself,\n  and never record, write, or invent one.\n- When the Step's done criterion is met, reply with a short summary and no tool\n  call. That finishes the Step and moves to the next one.\n- If the Step cannot be finished, say so plainly in your summary.\n"
+      },
+      {
+        "role": "user",
+        "content": "Run EVAL-HAPPY\nWork Order goal: File the September invoices from the AP mailbox\nStep 3 of 3 ('step-3')\nStep goal: Schedule the payment and archive the source\nDone criterion: The payment is scheduled and the source is in processed\nAllowed tools: erp.schedule_payment, files.archive\nResults from earlier Steps (use these facts; do not repeat a completed side effect):\n- Step 1 mail.read [ok]: Read message 'MSG-7001' from Dana Whitfield\n  data: {\"attachments\": [{\"content_type\": \"application/pdf\", \"filename\": \"NW-2026-001.pdf\", \"id\": \"ATT-8001\", \"path\": \"documents/invoices/NW-2026-001.pdf\", \"size_bytes\": 1150}, {\"content_type\": \"application/pdf\", \"filename\": \"AQ-2026-014.pdf\", \"id\": \"ATT-8002\", \"path\": \"documents/invoices/AQ-2026-014.pdf\", \"size_bytes\": 1151}, {\"content_type\": \"application/pdf\", \"filename\": \"CD-2026-007.pdf\", \"id\": \"ATT-8003\", \"path\": \"documents/invoices/CD-2026-007.pdf\", \"size_bytes\": 1149}, {\"content_type\": \"application/pdf\", \"filename\": \"BP-2026-123.pdf\", \"id\": \"ATT-8004\", \"path\": \"documents/invoices/BP-2026-123.pdf\", \"size_bytes\": 1147}, {\"content_type\": \"application/pdf\", \"filename\": \"SI-2026-550.pdf\", \"id\": \"ATT-8005\", \"path\": \"documents/invoices/SI-2026-550.pdf\", \"size_bytes\": 1152}, {\"content_type\": \"application/pdf\", \"filename\": \"BL-2026-001.pdf\", \"id\": \"ATT-8006\", \"path\": \"documents/invoices/BL-2026-001.pdf\", \"size_bytes\": 1151}, {\"content_type\": \"application/pdf\", \"filename\": \"RS-2026-088.pdf\", \"id\": \"ATT-8007\", \"path\": \"documents/invoices/RS-2026-088.pdf\", \"size_bytes\": 1151}], \"body\": \"Hi,\\n\\nPlease process the attached supplier invoices for September. Match each one against its purchase order and goods receipt before payment, and route anything unusual to me rather than guessing.\\n\\nThanks,\\nDana\", \"folder\": \"inbox\", \"id\": \"MSG-7001\", \"received_at\": \"2026-09-06T08:15:00+00:00\", \"scenario\": \"batch\", \"sender\": \"Dana Whitfield\", \"sender_email\": \"dana.whitfield@company.example\", \"subject\": \"Invoice batch for processing \u2014 September\"}\n- Step 2 erp.get_purchase_order [ok]: Fetched purchase order PO-2001\n  data: {\"purchase_order\": {\"amount_cents\": 125000, \"currency\": \"USD\", \"id\": \"PO-2001\", \"issued_at\": \"2026-09-01T09:00:00+00:00\", \"scenario\": \"happy\", \"status\": \"open\", \"vendor_id\": \"V-1001\"}}\n- Step 2 erp.get_goods_receipt [ok]: Fetched goods receipt GR-2501\n  data: {\"goods_receipt\": {\"amount_cents\": 125000, \"currency\": \"USD\", \"id\": \"GR-2501\", \"po_id\": \"PO-2001\", \"received_at\": \"2026-09-03T09:00:00+00:00\", \"scenario\": \"happy\", \"status\": \"received\"}}\n- Step 2 erp.file_invoice [ok]: Filed invoice NW-2026-001 as INV-3003 for 1,250.00 USD\n  data: {\"amount_cents\": 125000, \"currency\": \"USD\", \"gr_id\": \"GR-2501\", \"invoice_id\": \"INV-3003\", \"number\": \"NW-2026-001\", \"po_id\": \"PO-2001\", \"status\": \"received\", \"vendor_id\": \"V-1001\"}"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "c5",
+            "type": "function",
+            "function": {
+              "name": "erp.schedule_payment",
+              "arguments": "{\"invoice_id\": \"INV-3003\", \"scheduled_for\": \"2026-09-30\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c5",
+        "content": "{\"ok\":true,\"summary\":\"Scheduled payment PAY-4003 of 1,250.00 USD for INV-3003 on 2026-09-30\",\"data\":{\"payment_id\":\"PAY-4003\",\"invoice_id\":\"INV-3003\",\"amount_cents\":125000,\"currency\":\"USD\",\"scheduled_for\":\"2026-09-30\",\"status\":\"scheduled\"},\"error_kind\":null,\"artifacts\":[]}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "files.archive",
+          "description": "Archive a processed document by moving it into an archive folder, for example 'processed'.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Document to archive, relative to the root."
+              },
+              "directory": {
+                "type": "string",
+                "description": "Archive folder relative to the root. Defaults to 'archive'."
+              },
+              "overwrite": {
+                "type": "boolean",
+                "description": "Allow replacing an existing archived file. Defaults to false."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.schedule_payment",
+          "description": "Schedule the full payment for a filed invoice in LedgerLite. Partial or split payments are rejected.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "invoice_id": {
+                "type": "string",
+                "description": "LedgerLite invoice id."
+              },
+              "amount": {
+                "type": "number",
+                "description": "Optional amount in US dollars; must equal the invoice total."
+              },
+              "scheduled_for": {
+                "type": "string",
+                "description": "Payment date as YYYY-MM-DD. Defaults to 30 days from today."
+              }
+            },
+            "required": [
+              "invoice_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task.escalate",
+          "description": "Stop the Run and ask a human for help. Use when the Step cannot be completed safely and no tool can resolve it: a missing document or reference, an ambiguous instruction, or a condition you cannot fix. State the reason plainly and ask one specific question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "The blocking condition, stated plainly."
+              },
+              "question": {
+                "type": "string",
+                "description": "The one question for the human to answer."
+              }
+            },
+            "required": [
+              "reason",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "response_format": null
+  },
+  "response": {
+    "model": "deepseek-v4.1-flash",
+    "text": null,
+    "tool_calls": [
+      {
+        "id": "c6",
+        "name": "files.archive",
+        "arguments": {
+          "path": "documents/invoices/NW-2026-001.pdf",
+          "directory": "processed"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

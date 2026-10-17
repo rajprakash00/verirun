@@ -65,6 +65,29 @@ Every scenario prints its state and leaves both an `evidence.json` and a
 standalone `evidence.html` under `runs/<run-id>/`. Pass `--no-browser` to skip
 the screenshot, or `--state-dir`, `--shared`, and `--runs` to relocate state.
 
+## Eval harness
+
+```bash
+uv run verirun eval
+```
+
+The harness runs all twelve seeded scenarios end to end on the unchanged engine
+— in replay mode, so it is deterministic, offline, and free — and writes a
+report to `runs/eval/report.json` with per-Run metrics: terminal state,
+verification results per criterion, human interventions, steps, cost, and
+resume correctness. It exits non-zero when any scenario misses its known
+outcome, so a prompt, model, or Task Pack change is judged in one command.
+Pass `--no-browser` to skip the browser re-grounding scenario when Chromium is
+not installed, or `--report`, `--state-dir`, `--shared`, `--runs`, and
+`--fixtures` to relocate state.
+
+Replay fixtures for the scenarios are committed under `evals/fixtures/llm`.
+After a prompt or Company Context change, refresh them with:
+
+```bash
+uv run python scripts/record_eval_fixtures.py
+```
+
 ## Run a real request (live model)
 
 ```bash
@@ -268,19 +291,15 @@ the Company Context change.
 
 With two more weeks, in priority order:
 
-1. **An eval harness.** Run the seeded scenarios end to end in replay mode on
-   every change, and score task success, recovery rate, human interventions per
-   Run, steps, and cost. The tests lock outcomes today, but no aggregate quality
-   signal guards prompt, model, or Task Pack edits.
-2. **A company-memory write path.** After each verified Run, propose a
+1. **A company-memory write path.** After each verified Run, propose a
    structured precedent (vendor quirks, working selectors, mismatch
    resolutions). A human approves it. Resolve and Plan then retrieve the top few
    precedents per Request. Memory stays static until this path exists.
-3. **A trace-to-Task-Pack compiler.** Draft a Task Pack from a verified Run's
+2. **A trace-to-Task-Pack compiler.** Draft a Task Pack from a verified Run's
    journal: goal template, tool allowlist, approval rules, verification
    contract. A human reviews the draft. This lowers a new kind of work from a
    hand-written pack and check to a review.
-4. **Production hardening, after the above.** A Postgres-backed queue with
+3. **Production hardening, after the above.** A Postgres-backed queue with
    scheduling, authentication and tenancy, a secrets vault, per-tool capability
    scopes, and OpenTelemetry audit export.
 
