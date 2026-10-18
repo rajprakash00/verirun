@@ -1,0 +1,29 @@
+{
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Plan phase of Verirun. You turn a Work Order into an ordered plan\nof Steps. You never act and never call tools.\n\nReturn a single JSON object:\n{\n  \"steps\": [\n    {\n      \"id\": string,\n      \"goal\": string,\n      \"allowed_tools\": [string],\n      \"done_criterion\": string\n    }\n  ]\n}\n\nRules:\n- Each Step is one piece of work, ordered from first to last.\n- \"allowed_tools\" may only contain tool names from the Task Pack allowlist. Use\n  the smallest set of tools that can finish the Step.\n- The plan must cover every success criterion in the Work Order and follow the SOP.\n- Approval gates are engine mechanics, not Steps: plan the gated action itself,\n  for example scheduling an over-limit payment. Calling it parks the Run for a\n  human decision automatically, and the Run resumes with the answer. Never plan\n  a Step whose work is waiting for, collecting, or recording a human decision.\n- \"id\" is a short unique slug, for example \"step-1\", numbered in order.\n- \"done_criterion\" is a checkable statement that says when the Step is finished.\n- Reply with JSON only: no prose, no markdown.\n"
+      },
+      {
+        "role": "user",
+        "content": "Work Order (JSON):\n{\n  \"sop\": \"vendor-onboarding\",\n  \"goal\": \"Onboard Apex Office Supplies as a new supplier\",\n  \"assumptions\": [\n    \"The procurement mailbox holds the vendor request in scope\"\n  ],\n  \"systems\": [\n    \"maildesk\",\n    \"ledgerlite\",\n    \"files\"\n  ],\n  \"policies\": [\n    \"vendor-management\"\n  ],\n  \"approval_gates\": [\n    {\n      \"id\": \"vendor-creation\",\n      \"description\": \"Creating a vendor waits for a human decision\",\n      \"policy\": \"vendor-management\"\n    }\n  ],\n  \"success_criteria\": [\n    \"Apex Office Supplies is not created twice\"\n  ],\n  \"open_questions\": []\n}\n\nTool allowlist:\n[\n  \"mail.list\",\n  \"mail.read\",\n  \"mail.mark_read\",\n  \"files.list\",\n  \"files.read\",\n  \"files.write\",\n  \"files.move\",\n  \"files.archive\",\n  \"erp.list_vendors\",\n  \"erp.get_vendor\",\n  \"erp.create_vendor\"\n]\n\nSOP id: vendor-onboarding\n\nTask Pack goal template: Turn vendor onboarding requests from the procurement mailbox into validated vendors in LedgerLite, with the required tax form archived and any required human approval obtained. Request: {request}"
+      }
+    ],
+    "tools": [],
+    "response_format": {
+      "type": "json_object"
+    }
+  },
+  "response": {
+    "model": "deepseek-v4-pro",
+    "text": "{\"steps\": [{\"id\": \"step-1\", \"goal\": \"Read the onboarding email and its tax form\", \"allowed_tools\": [\"mail.read\", \"files.read\"], \"done_criterion\": \"The vendor legal name, tax id, and email are extracted\"}, {\"id\": \"step-2\", \"goal\": \"Check LedgerLite for an existing vendor\", \"allowed_tools\": [\"erp.list_vendors\"], \"done_criterion\": \"No vendor with the same name or tax id exists\"}, {\"id\": \"step-3\", \"goal\": \"Create the vendor in LedgerLite\", \"allowed_tools\": [\"erp.create_vendor\"], \"done_criterion\": \"The vendor exists in LedgerLite\"}, {\"id\": \"step-4\", \"goal\": \"Archive the tax form\", \"allowed_tools\": [\"files.archive\"], \"done_criterion\": \"The tax form is in the archive folder\"}]}",
+    "tool_calls": [],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

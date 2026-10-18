@@ -1,0 +1,99 @@
+{
+  "request": {
+    "model": "deepseek-v4.1-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Execute phase of Verirun. You finish one Step of the Plan at a\ntime by calling tools, one tool call per turn. After every call you observe the\nresult and decide the next move.\n\nRules:\n- Call only the tools allowed for the current Step, one at a time.\n- Read each observation. If a call failed, adapt: try another tool or another\n  argument.\n- Never repeat a call whose side effect already succeeded.\n- Approval gates are automatic: when you call a tool the policy gates, the Run\n  parks for a human decision and resumes with their answer. Call the gated tool\n  to request approval; never try to wait for or collect the decision yourself,\n  and never record, write, or invent one.\n- When the Step's done criterion is met, reply with a short summary and no tool\n  call. That finishes the Step and moves to the next one.\n- If the Step cannot be finished, say so plainly in your summary.\n"
+      },
+      {
+        "role": "user",
+        "content": "Run EVAL-UI-CHANGED\nWork Order goal: File the Northwind invoice after checking the LedgerLite form\nStep 2 of 4 ('step-2')\nStep goal: Match the invoice against its purchase order and goods receipt\nDone criterion: The amounts agree\nAllowed tools: erp.get_purchase_order, erp.get_goods_receipt\nResults from earlier Steps (use these facts; do not repeat a completed side effect):\n- Step 1 browser.navigate [ok]: Navigated to http://127.0.0.1:8002/invoices/new?ui=changed (LedgerLite \u2014 New invoice)\n  data: {\"status\": 200, \"title\": \"LedgerLite \u2014 New invoice\", \"url\": \"http://127.0.0.1:8002/invoices/new?ui=changed\"}\n- Step 1 browser.snapshot [ok]: Snapshot of LedgerLite \u2014 New invoice at http://127.0.0.1:8002/invoices/new?ui=changed with 14 refs\n  data: {\"nodes\": [{\"name\": \"Dashboard\", \"ref\": \"e1\", \"role\": \"link\"}, {\"name\": \"Invoices\", \"ref\": \"e2\", \"role\": \"link\"}, {\"name\": \"Vendors\", \"ref\": \"e3\", \"role\": \"link\"}, {\"name\": \"Purchase orders\", \"ref\": \"e4\", \"role\": \"link\"}, {\"name\": \"Goods receipts\", \"ref\": \"e5\", \"role\": \"link\"}, {\"name\": \"Payments\", \"ref\": \"e6\", \"role\": \"link\"}, {\"name\": \"Approvals\", \"ref\": \"e7\", \"role\": \"link\"}, {\"level\": 1, \"name\": \"New invoice\", \"ref\": null, \"role\": \"heading\"}, {\"name\": \"Vendor invoice number\", \"ref\": \"e8\", \"role\": \"textbox\", \"value\": \"\"}, {\"name\": \"Vendor\", \"options\": [{\"label\": \"V-1000 \u2014 Contoso Industrial\", \"value\": \"V-1000\"}, {\"label\": \"V-1001 \u2014 Northwind Traders\", \"value\": \"V-1001\"}, {\"label\": \"V-1002 \u2014 Apex Office Supplies\", \"value\": \"V-1002\"}, {\"label\": \"V-1003 \u2014 Cedar Components\", \"value\": \"V-1003\"}, {\"label\": \"V-1004 \u2014 Bright Path Consulting\", \"value\": \"V-1004\"}, {\"label\": \"V-1005 \u2014 Summit Industrial\", \"value\": \"V-1005\"}, {\"label\": \"V-1006 \u2014 Blocked Supplies Co\", \"value\": \"V-1006\"}, {\"label\": \"V-1007 \u2014 Riverstone Logistics\", \"value\": \"V-1007\"}, {\"label\": \"V-1008 \u2014 Paperline Print Shop\", \"value\": \"V-1008\"}], \"ref\": \"e9\", \"role\": \"combobox\", \"value\": \"V-1000\"}, {\"name\": \"Purchase order\", \"options\": [{\"label\": \"none\", \"value\": \"\"}, {\"label\": \"PO-2000 \u2014 V-1000 \u2014 980.00\", \"value\": \"PO-2000\"}, {\"label\": \"PO-2001 \u2014 V-1001 \u2014 1,250.00\", \"value\": \"PO-2001\"}, {\"label\": \"PO-2002 \u2014 V-1002 \u2014 640.00\", \"value\": \"PO-2002\"}, {\"label\": \"PO-2003 \u2014 V-1003 \u2014 2,000.00\", \"value\": \"PO-2003\"}, {\"label\": \"PO-2005 \u2014 V-1005 \u2014 12,500.00\", \"value\": \"PO-2005\"}, {\"label\": \"PO-2006 \u2014 V-1006 \u2014 300.00\", \"value\": \"PO-2006\"}, {\"label\": \"PO-2007 \u2014 V-1007 \u2014 890.00\", \"value\": \"PO-2007\"}, {\"label\": \"PO-2008 \u2014 V-1008 \u2014 1,050.00\", \"value\": \"PO-2008\"}], \"ref\": \"e10\", \"role\": \"combobox\", \"value\": \"\"}, {\"name\": \"Goods receipt\", \"options\": [{\"label\": \"none\", \"value\": \"\"}, {\"label\": \"GR-2500 \u2014 PO-2000\", \"value\": \"GR-2500\"}, {\"label\": \"GR-2501 \u2014 PO-2001\", \"value\": \"GR-2501\"}, {\"label\": \"GR-2502 \u2014 PO-2002\", \"value\": \"GR-2502\"}, {\"label\": \"GR-2503 \u2014 PO-2003\", \"value\": \"GR-2503\"}, {\"label\": \"GR-2505 \u2014 PO-2005\", \"value\": \"GR-2505\"}, {\"label\": \"GR-2506 \u2014 PO-2006\", \"value\": \"GR-2506\"}, {\"label\": \"GR-2507 \u2014 PO-2007\", \"value\": \"GR-2507\"}, {\"label\": \"GR-2508 \u2014 PO-2008\", \"value\": \"GR-2508\"}], \"ref\": \"e11\", \"role\": \"combobox\", \"value\": \"\"}, {\"name\": \"Amount\", \"ref\": \"e12\", \"role\": \"textbox\", \"value\": \"\"}, {\"name\": \"Currency\", \"ref\": \"e13\", \"role\": \"textbox\", \"value\": \"USD\"}, {\"name\": \"File invoice\", \"ref\": \"e14\", \"role\": \"button\"}], \"refs\": {\"e1\": {\"name\": \"Dashboard\", \"ref\": \"e1\", \"role\": \"link\"}, \"e10\": {\"name\": \"Purchase order\", \"options\": [{\"label\": \"none\", \"value\": \"\"}, {\"label\": \"PO-2000 \u2014 V-1000 \u2014 980.00\", \"value\": \"PO-2000\"}, {\"label\": \"PO-2001 \u2014 V-1001 \u2014 1,250.00\", \"value\": \"PO-2001\"}, {\"label\": \"PO-2002 \u2014 V-1002 \u2014 640.00\", \"value\": \"PO-2002\"}, {\"label\": \"PO-2003 \u2014 V-1003 \u2014 2,000.00\", \"value\": \"PO-2003\"}, {\"label\": \"PO-2005 \u2014 V-1005 \u2014 12,500.00\", \"value\": \"PO-2005\"}, {\"label\": \"PO-2006 \u2014 V-1006 \u2014 300.00\", \"value\": \"PO-2006\"}, {\"label\": \"PO-2007 \u2014 V-1007 \u2014 890.00\", \"value\": \"PO-2007\"}, {\"label\": \"PO-2008 \u2014 V-1008 \u2014 1,050.00\", \"value\": \"PO-2008\"}], \"ref\": \"e10\", \"role\": \"combobox\", \"value\": \"\"}, \"e11\": {\"name\": \"Goods receipt\", \"options\": [{\"label\": \"none\", \"value\": \"\"}, {\"label\": \"GR-2500 \u2014 PO-2000\", \"value\": \"GR-2500\"}, {\"label\": \"GR-2501 \u2014 PO-2001\", \"value\": \"GR-2501\"}, {\"label\": \"GR-2502 \u2014 PO-2002\", \"value\": \"GR-2502\"}, {\"label\": \"GR-2503 \u2014 PO-2003\", \"value\": \"GR-2503\"}, {\"label\": \"GR-2505 \u2014 PO-2005\", \"value\": \"GR-2505\"}, {\"label\": \"GR-2506 \u2014 PO-2006\", \"value\": \"GR-2506\"}, {\"label\": \"GR-2507 \u2014 PO-2007\", \"value\": \"GR-2507\"}, {\"label\": \"GR-2508 \u2014 PO-2008\", \"value\": \"GR-2508\"}], \"ref\": \"e11\", \"role\": \"combobox\", \"value\": \"\"}, \"e12\": {\"name\": \"Amount\", \"ref\": \"e12\", \"role\": \"textbox\", \"value\": \"\"}, \"e13\": {\"name\": \"Currency\", \"ref\": \"e13\", \"role\": \"textbox\", \"value\": \"USD\"}, \"e14\": {\"name\": \"File invoice\", \"ref\": \"e14\", \"role\": \"button\"}, \"e2\": {\"name\": \"Invoices\", \"ref\": \"e2\", \"role\": ... (truncated)\n- Step 1 browser.type [ok]: Typed 'NW-2026-001' into e8 (re-grounded via snapshot)\n  data: {\"locator\": {\"method\": \"snapshot\", \"name\": \"Vendor invoice number\", \"ref\": \"e15\", \"role\": \"textbox\"}, \"ref\": \"e8\", \"regrounded\": true, \"text\": \"NW-2026-001\"}\n- Step 1 browser.extract [ok]: Extracted 11 characters from e8 (re-grounded via replay)\n  data: {\"locator\": {\"method\": \"replay\", \"name\": \"Vendor invoice number\", \"ref\": \"e15\", \"role\": \"textbox\"}, \"ref\": \"e8\", \"regrounded\": true, \"text\": \"NW-2026-001\", \"url\": \"http://127.0.0.1:8002/invoices/new?ui=changed\"}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.get_purchase_order",
+          "description": "Fetch one purchase order by id.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "po_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "po_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.get_goods_receipt",
+          "description": "Fetch one goods receipt by id.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "gr_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "gr_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task.escalate",
+          "description": "Stop the Run and ask a human for help. Use when the Step cannot be completed safely and no tool can resolve it: a missing document or reference, an ambiguous instruction, or a condition you cannot fix. State the reason plainly and ask one specific question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "The blocking condition, stated plainly."
+              },
+              "question": {
+                "type": "string",
+                "description": "The one question for the human to answer."
+              }
+            },
+            "required": [
+              "reason",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "response_format": null
+  },
+  "response": {
+    "model": "deepseek-v4.1-flash",
+    "text": null,
+    "tool_calls": [
+      {
+        "id": "c5",
+        "name": "erp.get_purchase_order",
+        "arguments": {
+          "po_id": "PO-2001"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

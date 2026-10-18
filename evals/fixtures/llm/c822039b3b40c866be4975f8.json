@@ -1,0 +1,76 @@
+{
+  "request": {
+    "model": "deepseek-v4.1-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Execute phase of Verirun. You finish one Step of the Plan at a\ntime by calling tools, one tool call per turn. After every call you observe the\nresult and decide the next move.\n\nRules:\n- Call only the tools allowed for the current Step, one at a time.\n- Read each observation. If a call failed, adapt: try another tool or another\n  argument.\n- Never repeat a call whose side effect already succeeded.\n- Approval gates are automatic: when you call a tool the policy gates, the Run\n  parks for a human decision and resumes with their answer. Call the gated tool\n  to request approval; never try to wait for or collect the decision yourself,\n  and never record, write, or invent one.\n- When the Step's done criterion is met, reply with a short summary and no tool\n  call. That finishes the Step and moves to the next one.\n- If the Step cannot be finished, say so plainly in your summary.\n"
+      },
+      {
+        "role": "user",
+        "content": "Run EVAL-VENDOR-ONBOARDING\nWork Order goal: Onboard Cascade Fabrication LLC as a new supplier\nStep 2 of 4 ('step-2')\nStep goal: Check LedgerLite for an existing vendor\nDone criterion: No vendor with the same name or tax id exists\nAllowed tools: erp.list_vendors\nResults from earlier Steps (use these facts; do not repeat a completed side effect):\n- Step 1 mail.read [ok]: Read message 'MSG-7009' from Maya Alvarez\n  data: {\"attachments\": [{\"content_type\": \"application/pdf\", \"filename\": \"cascade-fabrication-w9.pdf\", \"id\": \"ATT-8015\", \"path\": \"documents/vendor-onboarding/cascade-fabrication-w9.pdf\", \"size_bytes\": 1212}], \"body\": \"Hello,\\n\\nPlease set up Cascade Fabrication LLC as a new supplier. Our completed W-9 is attached. I am the accounts contact on our side.\\n\\nThank you,\\nMaya Alvarez\", \"folder\": \"inbox\", \"id\": \"MSG-7009\", \"received_at\": \"2026-09-06T09:05:00+00:00\", \"scenario\": \"vendor_onboarding\", \"sender\": \"Maya Alvarez\", \"sender_email\": \"accounts@cascade-fabrication.example\", \"subject\": \"New supplier setup \u2014 Cascade Fabrication LLC\"}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.list_vendors",
+          "description": "List vendors in LedgerLite, optionally filtered by status.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "description": "Filter by status: active, blocked, pending."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task.escalate",
+          "description": "Stop the Run and ask a human for help. Use when the Step cannot be completed safely and no tool can resolve it: a missing document or reference, an ambiguous instruction, or a condition you cannot fix. State the reason plainly and ask one specific question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "The blocking condition, stated plainly."
+              },
+              "question": {
+                "type": "string",
+                "description": "The one question for the human to answer."
+              }
+            },
+            "required": [
+              "reason",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "response_format": null
+  },
+  "response": {
+    "model": "deepseek-v4.1-flash",
+    "text": null,
+    "tool_calls": [
+      {
+        "id": "c2",
+        "name": "erp.list_vendors",
+        "arguments": {}
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}
