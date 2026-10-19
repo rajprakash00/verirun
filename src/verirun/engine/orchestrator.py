@@ -89,8 +89,15 @@ def run_task(
     max_cost_usd: float = DEFAULT_MAX_COST_USD,
     prices: dict[str, ModelPrice] | None = None,
     run_id: str | None = None,
+    verifier: bool = True,
+    write_evidence: bool = True,
 ) -> Run:
-    """Drive one Request from Resolve to Report, always writing an Evidence Pack."""
+    """Drive one Request from Resolve to Report, writing an Evidence Pack.
+
+    ``verifier=False`` and ``write_evidence=False`` are eval-only ablation
+    switches: the Run accepts the executor's outcome without an independent
+    verification phase, and no Evidence Pack is written for the unverified run.
+    """
     run_id = run_id or generate_run_id()
     try:
         run = start_run(request, task_pack, context, client, store, run_id=run_id)
@@ -106,19 +113,21 @@ def run_task(
                 task_pack=task_pack,
             )
         if run.state is RunState.VERIFYING:
-            run = verify_run(
-                run.id,
+            run = _verify_or_accept(
+                run,
                 task_pack,
                 store,
+                client=client,
                 erp_db_path=erp_db_path,
                 shared_root=shared_root,
-                client=client,
+                verifier=verifier,
             )
     finally:
-        try:
-            report_run(run_id, store, evidence_root)
-        except RunNotFoundError:
-            pass
+        if write_evidence:
+            try:
+                report_run(run_id, store, evidence_root)
+            except RunNotFoundError:
+                pass
     return store.get_run(run_id)
 
 
@@ -135,11 +144,14 @@ def resume_run(
     max_steps: int = DEFAULT_MAX_STEPS,
     max_cost_usd: float = DEFAULT_MAX_COST_USD,
     prices: dict[str, ModelPrice] | None = None,
+    verifier: bool = True,
+    write_evidence: bool = True,
 ) -> Run:
     """Continue a parked or interrupted Run through Execute, Verify, and Report.
 
     A Run still awaiting a human decision is left exactly where it is: no
-    timeout ever submits a prepared action.
+    timeout ever submits a prepared action. ``verifier=False`` and
+    ``write_evidence=False`` are eval-only ablation switches.
     """
     run = store.get_run(run_id)
     if run.state in (
@@ -159,16 +171,40 @@ def resume_run(
             task_pack=task_pack,
         )
     if run.state is RunState.VERIFYING:
-        run = verify_run(
-            run_id,
+        run = _verify_or_accept(
+            run,
+            task_pack,
+            store,
+            client=client,
+            erp_db_path=erp_db_path,
+            shared_root=shared_root,
+            verifier=verifier,
+        )
+    if write_evidence:
+        report_run(run_id, store, evidence_root)
+    return store.get_run(run_id)
+
+
+def _verify_or_accept(
+    run: Run,
+    task_pack: TaskPack,
+    store: RunStore,
+    *,
+    client: LLMClient,
+    erp_db_path: str | Path,
+    shared_root: str | Path,
+    verifier: bool,
+) -> Run:
+    if verifier:
+        return verify_run(
+            run.id,
             task_pack,
             store,
             erp_db_path=erp_db_path,
             shared_root=shared_root,
             client=client,
         )
-    report_run(run_id, store, evidence_root)
-    return store.get_run(run_id)
+    return store.transition(run.id, RunState.COMPLETED)
 
 
 def report_run(run_id: str, store: RunStore, evidence_root: str | Path) -> Path:

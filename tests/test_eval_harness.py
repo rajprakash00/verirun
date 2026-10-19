@@ -18,7 +18,12 @@ from tests.support import ROOT
 from verirun.cli import main
 from verirun.config import Settings
 from verirun.engine.states import RunState
-from verirun.eval import SCENARIOS, EvalReport, run_eval
+from verirun.eval import (
+    SCENARIOS,
+    SILENT_FAILURE_SCENARIOS,
+    EvalReport,
+    run_eval,
+)
 from verirun.tools import BrowserSession
 
 EVAL_FIXTURES = ROOT / "evals" / "fixtures" / "llm"
@@ -171,8 +176,64 @@ def test_eval_command_writes_a_report(
     output = capsys.readouterr().out
     assert code == 0
     assert report_path.is_file()
-    assert '"passed": true' in report_path.read_text(encoding="utf-8")
+    payload = report_path.read_text(encoding="utf-8")
+    assert '"passed": true' in payload
+    assert '"ablations"' in payload
+    assert "undetected" in payload
     assert str(report_path) in output
+    assert "Ablations:" in output
+
+
+def test_eval_command_accepts_the_ablation_switches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    verifier_off = tmp_path / "verifier-off.json"
+    gates_off = tmp_path / "gates-off.json"
+
+    assert (
+        main(
+            [
+                "eval",
+                "--state-dir",
+                str(tmp_path / "state"),
+                "--shared",
+                str(tmp_path / "shared"),
+                "--runs",
+                str(tmp_path / "runs"),
+                "--report",
+                str(verifier_off),
+                "--no-browser",
+                "--no-verifier",
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "eval",
+                "--state-dir",
+                str(tmp_path / "state"),
+                "--shared",
+                str(tmp_path / "shared"),
+                "--runs",
+                str(tmp_path / "runs"),
+                "--report",
+                str(gates_off),
+                "--no-browser",
+                "--no-approval-gates",
+            ]
+        )
+        == 0
+    )
+
+    verifier_payload = verifier_off.read_text(encoding="utf-8")
+    gates_payload = gates_off.read_text(encoding="utf-8")
+    assert '"verifier": false' in verifier_payload
+    assert '"ablations": null' in verifier_payload
+    assert '"approval_gates": false' in gates_payload
+    assert '"ablations": null' in gates_payload
+    capsys.readouterr()
 
 
 def test_eval_includes_the_regrounding_scenario(
@@ -223,3 +284,129 @@ def test_a_broken_scenario_does_not_abort_the_eval(
     assert len(report.scenarios) == 1
     assert report.scenarios[0].problems
     assert report.scenarios[0].passed is False
+
+
+def test_the_report_contrasts_caught_and_undetected_failures(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    settings = eval_settings(tmp_path, ledgerlite_db, maildesk_state)
+
+    report = run_eval(settings, browser=False)
+
+    assert report.verifier is True
+    assert report.approval_gates is True
+    ablation = report.ablations
+    assert ablation is not None
+    assert ablation.passed is True
+    assert ablation.problems == []
+    assert ablation.probe_failures == 2
+    assert ablation.caught_failures == 2
+    assert ablation.caught_checks == 4
+    assert ablation.detection_rate == 1.0
+    assert ablation.undetected_failures == 2
+    assert ablation.undetected_rate == 1.0
+    assert ablation.gated_irreversible_actions == 2
+    assert ablation.ungated_irreversible_actions == 2
+    assert ablation.policy_denials == 1
+
+    cases = {case.key: case for case in ablation.cases}
+
+    phantom = cases["phantom_completion"]
+    assert phantom.verifier_on_state is RunState.FAILED
+    assert phantom.verifier_off_state is RunState.COMPLETED
+    assert phantom.caught_checks == [
+        "invoice-filed",
+        "payment-scheduled",
+        "source-archived",
+    ]
+    assert phantom.undetected is True
+
+    wrong_vendor = cases["wrong_vendor"]
+    assert wrong_vendor.verifier_on_state is RunState.FAILED
+    assert wrong_vendor.verifier_off_state is RunState.COMPLETED
+    assert wrong_vendor.caught_checks == ["invoice-filed"]
+    assert wrong_vendor.undetected is True
+
+    over_limit = cases["over_limit"]
+    assert over_limit.gated_actions == ["erp.schedule_payment"]
+    assert over_limit.gates_off_state is RunState.COMPLETED
+    assert over_limit.ungated_actions == ["erp.schedule_payment"]
+
+    vendor = cases["vendor_onboarding"]
+    assert vendor.gated_actions == ["erp.create_vendor"]
+    assert vendor.gates_off_state is RunState.COMPLETED
+    assert vendor.ungated_actions == ["erp.create_vendor"]
+
+    forbidden = cases["forbidden_action"]
+    assert forbidden.gates_off_state is RunState.NEEDS_HUMAN
+    assert forbidden.gates_off_escalations == 1
+    assert forbidden.ungated_actions == []
+
+    restored = EvalReport.model_validate_json(report.model_dump_json())
+    assert restored == report
+
+
+def test_the_verifier_switch_leaves_probe_failures_undetected(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    settings = eval_settings(tmp_path, ledgerlite_db, maildesk_state)
+
+    report = run_eval(settings, browser=False, verifier=False)
+
+    assert report.verifier is False
+    assert report.approval_gates is True
+    assert report.ablations is None
+    by_key = {scenario.key: scenario for scenario in report.scenarios}
+    assert set(by_key) >= {scenario.key for scenario in SILENT_FAILURE_SCENARIOS}
+
+    phantom = by_key["phantom_completion"]
+    assert phantom.state is RunState.COMPLETED
+    assert phantom.verification == []
+
+    wrong_vendor = by_key["wrong_vendor"]
+    assert wrong_vendor.state is RunState.COMPLETED
+    assert wrong_vendor.verification == []
+
+
+def test_the_approval_gate_switch_submits_irreversible_actions(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    settings = eval_settings(tmp_path, ledgerlite_db, maildesk_state)
+
+    report = run_eval(settings, browser=False, approval_gates=False)
+
+    assert report.verifier is True
+    assert report.approval_gates is False
+    assert report.ablations is None
+    by_key = {scenario.key: scenario for scenario in report.scenarios}
+
+    over_limit = by_key["over_limit"]
+    assert over_limit.state is RunState.COMPLETED
+    assert over_limit.parked_state is None
+    assert over_limit.approvals == []
+    assert "erp.schedule_payment" in over_limit.actions
+    assert over_limit.verification_passed is True
+
+    vendor = by_key["vendor_onboarding"]
+    assert vendor.state is RunState.COMPLETED
+    assert vendor.parked_state is None
+    assert vendor.approvals == []
+    assert "erp.create_vendor" in vendor.actions
+
+    forbidden = by_key["forbidden_action"]
+    assert forbidden.state is RunState.NEEDS_HUMAN
+    assert "policy denial" in forbidden.escalations[0].reason
+
+
+def test_the_eval_switches_are_off_by_default_in_the_product(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    settings = eval_settings(tmp_path, ledgerlite_db, maildesk_state)
+
+    report = run_eval(settings, browser=False)
+
+    assert report.verifier is True
+    assert report.approval_gates is True
+    by_key = {scenario.key: scenario for scenario in report.scenarios}
+    assert by_key["over_limit"].parked_state is RunState.AWAITING_APPROVAL
+    assert by_key["over_limit"].approvals[0].status == "approved"

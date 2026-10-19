@@ -28,11 +28,14 @@ def build_registry(
     client: LLMClient | None = None,
     *,
     browser: BrowserSession | None = None,
+    approval_gates: bool = True,
 ) -> ToolRegistry:
     """Every tool the Task Pack allows, governed by the policy gate.
 
     Passing a browser session adds the Playwright tools; the caller owns the
-    session's lifecycle and its artifact directory.
+    session's lifecycle and its artifact directory. ``approval_gates`` is an
+    eval-only ablation switch: policy denials still apply, but approval rules
+    execute instead of parking the Run.
     """
     tools = [
         *build_file_tools(settings.shared_dir),
@@ -55,7 +58,11 @@ def build_registry(
                 prices=settings.prices,
             )
         )
-    return ToolRegistry.from_task_pack(tools, task_pack, gate=PolicyGate(context.policies))
+    return ToolRegistry.from_task_pack(
+        tools,
+        task_pack,
+        gate=PolicyGate(context.policies, approval_gates=approval_gates),
+    )
 
 
 @contextmanager
