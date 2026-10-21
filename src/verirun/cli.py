@@ -78,6 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="run the browser re-grounding scenario (needs Chromium)",
     )
+    eval_parser.add_argument(
+        "--verifier",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="verify outcomes independently; --no-verifier is an eval ablation",
+    )
+    eval_parser.add_argument(
+        "--approval-gates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="pause at Approval Gates; --no-approval-gates is an eval ablation",
+    )
 
     return parser
 
@@ -193,7 +205,12 @@ def _eval_command(args: argparse.Namespace) -> int:
         erp_db=args.state_dir / "ledgerlite.db",
     )
     try:
-        report = run_eval(settings, browser=args.browser)
+        report = run_eval(
+            settings,
+            browser=args.browser,
+            verifier=args.verifier,
+            approval_gates=args.approval_gates,
+        )
         report_path = write_report(report, args.report)
     except Exception as exc:  # noqa: BLE001 - the CLI reports any eval failure and exits cleanly
         print(f"error: {exc}", file=sys.stderr)

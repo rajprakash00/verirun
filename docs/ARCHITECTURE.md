@@ -151,6 +151,13 @@ LedgerLite database and the filesystem. It does not read the executor's messages
 does not trust screenshots. Output: pass/fail per criterion with evidence references.
 Screenshots are display evidence only.
 
+The eval harness has two eval-only switches that the product paths leave at their defaults.
+Disabling the Verifier accepts the executor's outcome without a verification pass and writes
+no Evidence Pack for that Run; disabling the Approval Gates lets a `require_approval` policy
+decision execute, while `forbid` decisions still deny. The harness runs both ablations beside
+the baseline and reports caught failures, undetected failures, and gated versus ungated
+irreversible actions. See ADR 0006.
+
 ## 8. Reliability and state
 
 - Run store (SQLite): run state, checkpoints, observations, Evidence Pack index.

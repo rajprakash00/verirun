@@ -32,6 +32,10 @@ Shared vocabulary for this project. A glossary only. No implementation details.
 
 **Verifier** — the part that checks the result of a Run against real system state. Separate from the doer. Does not trust messages or screens.
 
+**Ablation** — an eval-only passing of the same scenarios with one control disabled, to measure what that control catches.
+
+**Silent-failure probe** — a seeded scenario whose doer reports success that the real system state does not support, so only the Verifier can catch it.
+
 **Evidence Pack** — the output of a Run: result, proof, action log, open questions.
 
 **Task Pack** — the declarative definition of one kind of work: goal template, SOP, tool allowlist, verification contract. Changing the Task Pack changes the task; the engine stays the same.

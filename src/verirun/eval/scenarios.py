@@ -731,6 +731,63 @@ def vendor_missing_tax_form_script() -> StageClient:
     )
 
 
+WRONG_VENDOR_PLAN = {
+    "steps": [
+        {
+            "id": "step-1",
+            "goal": "File the Northwind invoice, schedule its payment, and archive it",
+            "allowed_tools": ["erp.file_invoice", "erp.schedule_payment", "files.archive"],
+            "done_criterion": "The invoice is filed and paid",
+        }
+    ]
+}
+
+
+def phantom_completion_script() -> StageClient:
+    """A doer that claims every Step is done without calling a single tool."""
+    return StageClient(
+        [
+            json.dumps(
+                invoice_work_order(
+                    "File the Northwind invoice from the September AP mailbox",
+                    ["Invoice NW-2026-001 exists in LedgerLite"],
+                )
+            ),
+            json.dumps(HAPPY_PLAN),
+            text_turn("Filed NW-2026-001 in LedgerLite."),
+            text_turn(f"Scheduled the payment as {FILED_INVOICE_ID}."),
+            text_turn("Archived the source document."),
+        ]
+    )
+
+
+def wrong_vendor_script() -> StageClient:
+    """A doer whose tool calls succeed but write the invoice to the wrong vendor."""
+    return StageClient(
+        [
+            json.dumps(
+                invoice_work_order(
+                    "File the Northwind invoice from the AP mailbox",
+                    ["Invoice NW-2026-001 exists in LedgerLite"],
+                )
+            ),
+            json.dumps(WRONG_VENDOR_PLAN),
+            tool_turn(
+                "erp.file_invoice",
+                {
+                    "number": "NW-2026-001",
+                    "vendor_id": "V-1002",
+                    "amount": 1250.00,
+                },
+                call_id="c1",
+            ),
+            schedule_payment_turn(call_id="c2"),
+            archive_turn("documents/invoices/NW-2026-001.pdf", call_id="c3"),
+            text_turn("Filed, paid, and archived."),
+        ]
+    )
+
+
 @dataclass(frozen=True)
 class Scenario:
     """One seeded scenario the eval runs end to end."""
@@ -744,6 +801,7 @@ class Scenario:
     parked_state: RunState | None = None
     approval: bool = False
     checks: tuple[str, ...] = ()
+    expected_failed_checks: tuple[str, ...] = ()
     escalations: int = 0
     approvals: int = 0
     resumed: bool = False
@@ -880,5 +938,28 @@ SCENARIOS: tuple[Scenario, ...] = (
         script=vendor_missing_tax_form_script,
         expected_state=RunState.NEEDS_HUMAN,
         escalations=1,
+    ),
+)
+
+SILENT_FAILURE_SCENARIOS: tuple[Scenario, ...] = (
+    Scenario(
+        key="phantom_completion",
+        title="Doer claims success without any tool calls",
+        task_id="invoice-processing",
+        request="Process the Northwind invoice from the September AP mailbox",
+        script=phantom_completion_script,
+        expected_state=RunState.FAILED,
+        checks=INVOICE_CHECKS,
+        expected_failed_checks=INVOICE_CHECKS,
+    ),
+    Scenario(
+        key="wrong_vendor",
+        title="Doer files the invoice against the wrong vendor",
+        task_id="invoice-processing",
+        request="Process the Northwind invoice from the AP mailbox",
+        script=wrong_vendor_script,
+        expected_state=RunState.FAILED,
+        checks=INVOICE_CHECKS,
+        expected_failed_checks=("invoice-filed",),
     ),
 )
