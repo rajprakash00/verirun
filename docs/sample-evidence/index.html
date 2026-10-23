@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evidence Pack RUN-20261023-B97FE8 — Verirun</title>
+<style>
+  :root {
+    --ink: #1c2333; --muted: #5b6577; --line: #dde3ec; --bg: #f5f7fb;
+    --accent: #2f5dd1; --ok: #1c7c4a; --warn: #a86400; --bad: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { background: #fff; border-bottom: 1px solid var(--line); padding: 20px 24px; }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); }
+  main { max-width: 1080px; margin: 24px auto; padding: 0 24px 64px; }
+  h2 {
+    font-size: 15px; margin: 0 0 10px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted);
+  }
+  h3 { font-size: 14px; margin: 18px 0 6px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
+  .state { display: inline-block; border-radius: 999px; padding: 3px 12px; font-weight: 700; background: #e8ecf5; }
+  .state-completed { background: #e2f4e8; color: var(--ok); }
+  .state-awaiting_approval { background: #fff1d6; color: var(--warn); }
+  .state-needs_human, .state-failed, .state-limit_reached { background: #fde7e5; color: var(--bad); }
+  .metrics { display: flex; gap: 32px; margin: 12px 0 0; flex-wrap: wrap; }
+  .metrics div { min-width: 120px; }
+  .metrics dt { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .metrics dd { margin: 2px 0 0; font-size: 18px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: none; }
+  code { background: #eef1f7; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+  pre { background: #eef1f7; border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-size: 13px; }
+  ul { margin: 6px 0; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .error { color: var(--bad); font-weight: 600; }
+  .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  .badge.ok { color: var(--ok); }
+  .badge.bad { color: var(--bad); }
+  .badge.warn { color: var(--warn); }
+  .timeline { list-style: none; margin: 0; padding: 0; }
+  .timeline li { border-left: 3px solid var(--line); margin-left: 6px; padding: 5px 0 10px 14px; }
+  .timeline li.ok { border-color: #9fd3b4; }
+  .timeline li.bad { border-color: #eab6b2; }
+  .timeline .when { color: var(--muted); font-size: 12px; }
+  .gallery { display: flex; flex-wrap: wrap; gap: 16px; }
+  .gallery figure { margin: 0; max-width: 420px; }
+  .gallery img { width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; }
+  .gallery figcaption { color: var(--muted); font-size: 12px; padding-top: 4px; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 0 24px 40px; }
+</style>
+</head>
+<body data-run-id="RUN-20261023-B97FE8" data-result="verified"
+      data-verified="true">
+<header>
+  <h1>Evidence Pack <span class="state state-completed">verified</span></h1>
+  <p>RUN-20261023-B97FE8 · task <code>invoice-processing</code> · generated 2026-10-23T02:20:56+00:00</p>
+</header>
+<main>
+
+  <div class="card">
+    <h2>Run</h2>
+    <p>Process the invoices in the AP mailbox</p>
+    <div class="metrics">
+      <div><dt>Cost</dt><dd id="metric-cost">$0.00</dd></div>
+      <div><dt>Steps used</dt><dd id="metric-steps">4</dd></div>
+      <div><dt>Created</dt><dd class="muted">2026-10-23T02:20:56.469624+00:00</dd></div>
+      <div><dt>Updated</dt><dd class="muted">2026-10-23T02:20:56.612040+00:00</dd></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Work Order</h2>
+    <p><strong>File the September invoices from the AP mailbox</strong></p>
+    <p class="muted">SOP <code>invoice-processing</code>
+      · systems maildesk, ledgerlite, files
+      · policies spend-limits, action-rules</p>
+    <h3>Assumptions</h3>
+    <ul><li>Only the September batch is in scope</li></ul>
+    <h3>Approval gates</h3>
+    <ul>
+      <li><code>over-spend-limit</code> — Payments above 10,000 USD wait for a human <span class="muted">[spend-limits]</span></li>
+    </ul>
+    <h3>Success criteria</h3>
+    <ul><li>Invoices are filed and verified in LedgerLite</li></ul>
+  </div>
+
+  <div class="card">
+    <h2>Plan</h2>
+    <ol class="steps">
+      <li>
+        <strong>File the Summit Industrial invoice</strong> <span class="muted">(step-1)</span>
+        <div class="muted">tools: erp.file_invoice</div>
+        <div class="muted">done when: SI-2026-550 is filed against PO-2005 and GR-2505</div>
+      </li>
+      <li>
+        <strong>Prepare and schedule the payment</strong> <span class="muted">(step-2)</span>
+        <div class="muted">tools: erp.schedule_payment</div>
+        <div class="muted">done when: The payment is scheduled once a human approves it</div>
+      </li>
+      <li>
+        <strong>Archive the source invoice</strong> <span class="muted">(step-3)</span>
+        <div class="muted">tools: files.archive</div>
+        <div class="muted">done when: The source is in processed</div>
+      </li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Timeline</h2>
+    <ul class="timeline">
+      <li class="ok">
+        <span class="badge ok">ok</span>
+        <strong>erp.file_invoice</strong>
+        <div>done: {&#34;ok&#34;: true, &#34;summary&#34;: &#34;Filed invoice SI-2026-550 as INV-3003 for 12,500.00 USD&#34;, &#34;data&#34;: {&#34;invoice_id&#34;: &#34;INV-3003&#34;, &#34;number&#34;: &#34;SI-2026-550&#34;, &#34;vendor_id&#34;: &#34;V-1005&#34;, &#34;amount_cents&#34;: 1250000, &#34;currency&#34;: &#34;USD&#34;, &#34;po_id&#34;: &#34;PO-2005&#34;, &#34;gr_id&#34;: &#34;GR-2505&#34;, &#34;status&#34;: &#34;received&#34;}, &#34;error_kind&#34;: null, &#34;artifacts&#34;: []}</div>
+        <div class="when">2026-10-23T02:20:56.498667+00:00</div>
+      </li>
+      <li class="ok">
+        <span class="badge ok">ok</span>
+        <strong>erp.file_invoice</strong>
+        <div>Filed invoice SI-2026-550 as INV-3003 for 12,500.00 USD</div>
+        <div class="when">2026-10-23T02:20:56.510125+00:00</div>
+      </li>
+      <li class="ok">
+        <span class="badge ok">ok</span>
+        <strong>erp.schedule_payment</strong>
+        <div>done: {&#34;ok&#34;: true, &#34;summary&#34;: &#34;Scheduled payment PAY-4003 of 12,500.00 USD for INV-3003 on 2026-11-22&#34;, &#34;data&#34;: {&#34;payment_id&#34;: &#34;PAY-4003&#34;, &#34;invoice_id&#34;: &#34;INV-3003&#34;, &#34;amount_cents&#34;: 1250000, &#34;currency&#34;: &#34;USD&#34;, &#34;scheduled_for&#34;: &#34;2026-11-22&#34;, &#34;status&#34;: &#34;scheduled&#34;}, &#34;error_kind&#34;: null, &#34;artifacts&#34;: []}</div>
+        <div class="when">2026-10-23T02:20:56.525314+00:00</div>
+      </li>
+      <li class="bad">
+        <span class="badge bad">failed</span>
+        <strong>erp.schedule_payment</strong>
+        <div>Policy spend-limits requires approval for payment.schedule: Any payment above 10,000.00 USD must be prepared, then held at an approval gate until a human approves it. Timeouts never auto-approve. [policy]</div>
+        <div class="when">2026-10-23T02:20:56.532035+00:00</div>
+      </li>
+      <li class="ok">
+        <span class="badge ok">ok</span>
+        <strong>erp.schedule_payment</strong>
+        <div>Scheduled payment PAY-4003 of 12,500.00 USD for INV-3003 on 2026-11-22</div>
+        <div class="when">2026-10-23T02:20:56.564205+00:00</div>
+      </li>
+      <li class="ok">
+        <span class="badge ok">ok</span>
+        <strong>files.archive</strong>
+        <div>done: {&#34;ok&#34;: true, &#34;summary&#34;: &#34;Archived &#39;documents/invoices/SI-2026-550.pdf&#39; as &#39;processed/SI-2026-550.pdf&#39;&#34;, &#34;data&#34;: {&#34;source&#34;: &#34;documents/invoices/SI-2026-550.pdf&#34;, &#34;path&#34;: &#34;processed/SI-2026-550.pdf&#34;}, &#34;error_kind&#34;: null, &#34;artifacts&#34;: []}</div>
+        <div class="when">2026-10-23T02:20:56.580772+00:00</div>
+      </li>
+      <li class="ok">
+        <span class="badge ok">ok</span>
+        <strong>files.archive</strong>
+        <div>Archived &#39;documents/invoices/SI-2026-550.pdf&#39; as &#39;processed/SI-2026-550.pdf&#39;</div>
+        <div class="when">2026-10-23T02:20:56.591307+00:00</div>
+      </li>
+    </ul>
+  </div>
+
+
+  <div class="card">
+    <h2>Approvals</h2>
+    <table>
+      <thead><tr><th>Action</th><th>Status</th><th>Policy</th><th>Reason</th><th>Arguments</th><th>Decided</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>erp.schedule_payment</code><br>payment.schedule<br><span class="muted">step step-2</span></td>
+          <td><span class="badge ok">approved</span>
+</td>
+          <td>spend-limits<br><span class="muted">approval-threshold</span></td>
+          <td>Any payment above 10,000.00 USD must be prepared, then held at an approval gate until a human approves it. Timeouts never auto-approve.</td>
+          <td><code>{"invoice_id": "INV-3003"}</code></td>
+          <td class="muted">2026-10-23T02:20:56.541919+00:00<br>executed 2026-10-23T02:20:56.557217+00:00</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Verification</h2>
+    <p><span class="badge ok">
+      all checks passed</span></p>
+    <ul>
+      <li>
+        <span class="badge ok">pass</span>
+        <code>invoice-filed</code> — The invoice exists in LedgerLite against the right vendor and amount.
+        <div class="muted">1 filed invoice(s) agree with their source documents and LedgerLite records</div>
+<div class="muted">evidence: erp:INV-3003, source:processed/SI-2026-550.pdf</div>      </li>
+      <li>
+        <span class="badge ok">pass</span>
+        <code>payment-scheduled</code> — A payment is scheduled for the invoice, or an approval is pending above the limit.
+        <div class="muted">1 filed invoice(s) have a payment or a pending approval</div>
+<div class="muted">evidence: payment:PAY-4003:scheduled</div>      </li>
+      <li>
+        <span class="badge ok">pass</span>
+        <code>source-archived</code> — The source invoice document is in the processed archive.
+        <div class="muted">1 source document(s) archived in &#39;processed&#39;</div>
+<div class="muted">evidence: file:processed/SI-2026-550.pdf</div>      </li>
+    </ul>
+  </div>
+
+
+  <div class="card">
+    <h2>Artifacts</h2>
+    <ul><li><code>processed/SI-2026-550.pdf</code></li></ul>
+  </div>
+
+  <div class="card">
+    <h2>Open questions</h2>
+<p class="muted">None.</p>  </div>
+
+</main>
+<footer>Verirun · RUN-20261023-B97FE8 · evidence.json and evidence.html</footer>
+</body>
+</html>

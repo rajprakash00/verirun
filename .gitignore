@@ -7,6 +7,7 @@ __pycache__/
 coverage.xml
 htmlcov/
 *.webm
+!docs/media/*.webm
 *.mp4
 *.db
 mocks/state/

@@ -91,6 +91,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="pause at Approval Gates; --no-approval-gates is an eval ablation",
     )
 
+    from verirun.demo import add_arguments as add_demo_arguments
+
+    demo = subparsers.add_parser(
+        "demo", help="seed the Mock Suite and run the three-scenario demo"
+    )
+    add_demo_arguments(demo)
+
     return parser
 
 
@@ -109,7 +116,15 @@ def main(
         return _report_command(args, settings)
     if args.command == "eval":
         return _eval_command(args)
+    if args.command == "demo":
+        return _demo_command(args)
     return 0
+
+
+def _demo_command(args: argparse.Namespace) -> int:
+    from verirun.demo import run
+
+    return run(args)
 
 
 def _serve_command(args: argparse.Namespace, settings: Settings | None) -> int:

@@ -212,6 +212,7 @@ verirun/
 │   ├── invoice-processing.yaml
 │   └── vendor-onboarding.yaml
 ├── src/verirun/
+│   ├── demo.py                # one-command demo
 │   ├── engine/                # state machine, planner, executor, verifier
 │   ├── context/               # Company Context loader, Work Order
 │   ├── llm/                   # provider client, replay, cost meter
@@ -222,7 +223,7 @@ verirun/
 │   ├── maildesk/
 │   ├── ledgerlite/
 │   └── seed/
-├── scripts/                   # dev helpers (seed, demo, record fixtures, serve)
+├── scripts/                   # dev helpers (seed, serve, fixture and demo recording)
 ├── tests/                     # integration + unit tests
 └── docs/
     ├── ARCHITECTURE.md        # this file
