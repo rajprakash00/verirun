@@ -32,7 +32,6 @@ def test_demo_runs_happy_failure_and_approval(
 
     output = capsys.readouterr().out
     assert code == 0
-    assert "Demo complete" in output
     ids = dict(re.findall(r"\[(happy|transient|approval)\] (RUN-\S+):", output))
     assert set(ids) == {"happy", "transient", "approval"}
 
@@ -47,6 +46,8 @@ def test_demo_runs_happy_failure_and_approval(
     for run_id in ids.values():
         assert (runs_dir / run_id / "evidence.json").is_file()
         assert (runs_dir / run_id / "evidence.html").is_file()
+        checks = store.get_verification(run_id)
+        assert checks and all(check.ok for check in checks)
 
     happy_evidence = json.loads(
         (runs_dir / ids["happy"] / "evidence.json").read_text(encoding="utf-8")

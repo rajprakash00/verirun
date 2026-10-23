@@ -16,7 +16,7 @@ body:
       label: Steps to reproduce
       description: Exact commands, Run ids, or a failing test name.
       placeholder: |
-        1. uv run python scripts/demo.py
+        1. uv run verirun demo
         2. ...
     validations:
       required: true

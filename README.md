@@ -4,132 +4,119 @@
 [![Coverage](https://codecov.io/gh/rajprakash00/verirun/branch/main/graph/badge.svg)](https://codecov.io/gh/rajprakash00/verirun)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Verirun turns a short company Request into completed work. For every Request it:
+**The problem.** Company work arrives as a short request — "process the
+invoices" — but completing it means reading mail, checking an ERP, filing
+documents, driving a browser, and knowing when a human must decide. An agent
+that only reports what it did cannot be trusted with that work. Verirun is a
+compact agent runtime that plans the work, executes it with real tools, recovers
+from failures, stops at **Approval Gates** before irreversible actions, and
+**verifies the outcome against ground truth** before calling it done.
 
-1. reads the **Company Context** (SOPs, policies, system registry, precedents) to
-   discover the unstated steps;
-2. writes a **Work Order**: assumptions, steps, systems, approval gates, and
-   success criteria;
-3. **plans and executes** with real tools: files, mail, internal systems, and
-   browser automation through Playwright;
-4. **observes and adapts** on failure: retry, alternate strategy, re-plan, or
-   escalate;
-5. stops at **Approval Gates** before irreversible actions;
-6. **verifies** the outcome independently against real system state — not
-   against its own messages; and
-7. returns an **Evidence Pack**: result, proof, action log, open questions.
-
-One unchanged engine runs two tasks, demonstrated against a self-contained Mock
-Suite: **invoice processing** and **vendor onboarding**.
+One unchanged engine runs two Task Packs — invoice processing and vendor
+onboarding — against a self-contained Mock Suite. The demo is offline,
+deterministic, and needs no API key.
 
 - Product spec: [`SPEC.md`](SPEC.md)
 - Design document: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Glossary: [`CONTEXT.md`](CONTEXT.md)
+- [Watch the short recording](docs/media/demo.webm) ·
+  [Open a sample Evidence Pack](https://rajprakash00.github.io/verirun/sample-evidence/)
 
-## Requirements
+## Quickstart
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-- Headless Chromium for the browser tools and browser tests (Playwright
-  downloads its own copy)
-
-## Setup
+Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and headless Chromium
+(Playwright downloads its own copy).
 
 ```bash
+git clone https://github.com/rajprakash00/verirun.git
+cd verirun
 uv sync
 uv run playwright install chromium          # add --with-deps on a fresh Linux box
-cp .env.example .env                        # fill in VERIRUN_API_KEY for live runs
+uv run verirun demo
 ```
 
-The demo and the test suite run offline and need no API key. Live model calls
-happen only when you start a request (`verirun run`) or approve a parked Run in
-the dashboard; both use the gateway settings from `.env`.
+`verirun demo` resets and seeds the Mock Suite, then runs three scenarios on the
+unchanged engine: a happy path, a transient ERP failure that the engine retries,
+and an over-limit payment that parks at an Approval Gate until a human approves
+it. It prints each Run's state, recovery, verification result, and Evidence Pack
+path; a completed Run is visible in under a minute. Everything runs offline and
+free. Pass `--no-browser` to skip the screenshot, or `--state-dir`, `--shared`,
+and `--runs` to relocate state.
 
-## Run the demo
+Prefer not to install it? [Watch the recording](#the-demo) and
+[open the sample Evidence Pack](#sample-evidence-pack).
 
-```bash
-uv run python scripts/demo.py
+## Architecture
+
+```
+Request ──► CLI | Dashboard ──► Orchestrator
+                                created → resolving → planned →
+                                executing → verifying → completed
+                                (awaiting_approval at Approval Gates;
+                                 needs_human, failed, limit_reached)
+                                   │                      │
+                              Tool Layer               Verifier
+                        browser / files / mail / erp   reads ground truth
+                                   │                      │
+                              Mock Suite: MailDesk, LedgerLite, shared files
 ```
 
-The script seeds the Mock Suite and runs three scenarios end to end on the
-unchanged engine:
+The **Engine** is a guarded state machine; failures resolve in a fixed order:
+retry → alternate strategy → re-plan → escalate. **Task Packs** (`tasks/*.yaml`)
+declare the tool allowlist, approval rules, and verification contract, so the
+engine contains no task-specific logic. The **Company Context** (`company/`)
+supplies the SOPs, policies, system registry, and precedents. The **Verifier**
+reads LedgerLite state and the filesystem, never the executor's messages or
+screenshots. Every Run, verified or not, leaves an **Evidence Pack**.
 
-1. **Happy path** — read the invoice email, validate against the PO and goods
-   receipt, file it, schedule the payment, and archive the source. (With
-   Chromium installed, it also captures a LedgerLite screenshot.)
-2. **Transient failure** — the ERP write fails once and the engine retries it.
-3. **Over-limit approval** — the Run parks at the payment gate, a human
-   approves, and the resumed Run completes.
+Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the state machine, failure
+ladder, and trust boundaries.
 
-Every scenario prints its state and leaves both an `evidence.json` and a
-standalone `evidence.html` under `runs/<run-id>/`. Pass `--no-browser` to skip
-the screenshot, or `--state-dir`, `--shared`, and `--runs` to relocate state.
-
-## Evaluation
+## Evaluation results
 
 ```bash
 uv run verirun eval
 ```
 
-The harness runs all twelve seeded scenarios end to end on the unchanged engine
-— in replay mode, so it is deterministic, offline, and free — and writes a
-report to `runs/eval/report.json` with per-Run metrics: terminal state,
-verification results per criterion, human interventions, steps, cost, resume
-correctness, and completed actions. It exits non-zero when any scenario misses
-its known outcome, so a prompt, model, or Task Pack change is judged in one
-command. Pass `--no-browser` to skip the browser re-grounding scenario when
-Chromium is not installed, or `--report`, `--state-dir`, `--shared`, `--runs`,
-and `--fixtures` to relocate state.
-
-The same command runs two eval-only ablations and reports the contrast.
-`--no-verifier` disables the independent Verifier; `--no-approval-gates` lets
-gated irreversible actions execute. Neither switch exists on `run`, `serve`, or
-`report`: unset, product behavior is unchanged.
-
-### Results
-
-Output on this repository (`uv run verirun eval`):
+The harness runs twelve seeded scenarios plus two deliberately overclaiming
+probes in replay mode — deterministic, offline, and free — and writes
+`runs/eval/report.json`.
 
 | Pass | Result |
 | --- | --- |
 | Baseline | 12/12 known outcomes; 6 completed (two after approval), 6 ended `needs_human`; 47 steps; $0.0365 |
-| Verifier off | both deliberately overclaiming probes ended `completed` with no verdict |
+| Verifier off | both overclaiming probes ended `completed` with no verdict |
 | Approval gates off | both gated irreversible actions executed with no human decision |
 
-| Probe | Verifier on | Verifier off |
-| --- | --- | --- |
-| **Phantom completion** — the doer claims every Step is done without calling a tool | failed: `invoice-filed`, `payment-scheduled`, `source-archived` | `completed`, no verification |
-| **Wrong vendor** — every tool call succeeds, but the invoice is filed against the wrong vendor | failed: `invoice-filed` | `completed`, no verification |
-
-| Gated action | Gates on | Gates off |
-| --- | --- | --- |
-| $12,500 payment above the spend limit | `awaiting_approval`, then completed after a human yes | payment scheduled with no human |
-| Vendor creation | `awaiting_approval`, then completed after a human yes | vendor created with no human |
-| Forbidden payment to a blocked vendor | `needs_human` with the policy denial | still `needs_human` with the policy denial |
-
 **Caught vs undetected:** the Verifier caught both probe failures (4 failed
-checks); with the Verifier off, both probes ended `completed` with no verdict.
-The Approval Gates held both irreversible actions; with the gates off, both were
-submitted. Policy denials are not Approval Gates, so the blocked-vendor payment
-is still denied.
+checks); without it, both probes ended `completed` with no verification. The
+Approval Gates held both irreversible actions; without them, both were submitted.
+A policy denial is not an Approval Gate, so the forbidden payment is still
+denied with the gates off.
 
-### Honest failure cases
+These are mechanism checks, not a benchmark score. The probes are constructed,
+the Verifier only catches what a Task Pack contract checks, and replay fixtures
+measure the engine rather than live model quality. Full tables and honest
+failure cases are under [Evaluation in detail](#evaluation-in-detail).
 
-- The two probes are constructed to overclaim; they are not sampled from live
-  model traffic. A 2/2 detection rate demonstrates the mechanism, not a
-  benchmark score.
-- The Verifier only catches what the Task Pack contract checks. A defect outside
-  the contract — a plausible but wrong payment date, for example — passes.
-- The eval replays committed fixtures, so it measures the engine and Task Packs,
-  not live model quality. Changing prompts or the Company Context invalidates
-  the fixtures until re-recorded.
+## The demo
 
-Replay fixtures for every baseline and ablation pass are committed under
-`evals/fixtures/llm`. After a prompt or Company Context change, refresh them with:
+![Terminal recording of verirun demo: a happy path, a transient failure recovered by a retry, an Approval Gate, and three passing Verification contracts](docs/media/demo.gif)
 
-```bash
-uv run python scripts/record_eval_fixtures.py
-```
+_A real `uv run verirun demo` run, replayed as a terminal recording. The
+[WebM version](docs/media/demo.webm) is sharper; regenerate both with
+`uv run python scripts/record_demo.py`._
+
+## Sample Evidence Pack
+
+[**Open the sample Evidence Pack**](https://rajprakash00.github.io/verirun/sample-evidence/)
+— a completed invoice-processing Run that parked at an Approval Gate, with its
+Work Order, Plan, timeline, approval decision, and passing verification checks.
+It is one static HTML file with no server and no network: the committed source
+is [`docs/sample-evidence/index.html`](docs/sample-evidence/index.html). GitHub
+Pages is configured with GitHub Actions as the source and publishes `docs/` on
+pushes to `main` that change it
+([`pages.yml`](.github/workflows/pages.yml)).
 
 ## Run a real request (live model)
 
@@ -191,6 +178,51 @@ Every Run — verified or not — writes two files under `runs/<run-id>/`:
   screenshots in the Run directory. Images are inlined as data URIs, so the file
   opens standalone in any browser with no server and no network.
 
+## Evaluation in detail
+
+Output on this repository (`uv run verirun eval`):
+
+| Probe | Verifier on | Verifier off |
+| --- | --- | --- |
+| **Phantom completion** — the doer claims every Step is done without calling a tool | failed: `invoice-filed`, `payment-scheduled`, `source-archived` | `completed`, no verification |
+| **Wrong vendor** — every tool call succeeds, but the invoice is filed against the wrong vendor | failed: `invoice-filed` | `completed`, no verification |
+
+| Gated action | Gates on | Gates off |
+| --- | --- | --- |
+| $12,500 payment above the spend limit | `awaiting_approval`, then completed after a human yes | payment scheduled with no human |
+| Vendor creation | `awaiting_approval`, then completed after a human yes | vendor created with no human |
+| Forbidden payment to a blocked vendor | `needs_human` with the policy denial | still `needs_human` with the policy denial |
+
+The same harness asserts per-Run metrics: terminal state, verification results
+per criterion, human interventions, steps, cost, resume correctness, and
+completed actions. It exits non-zero when any scenario misses its known outcome,
+so a prompt, model, or Task Pack change is judged in one command. Pass
+`--no-browser` to skip the browser re-grounding scenario when Chromium is not
+installed, or `--report`, `--state-dir`, `--shared`, `--runs`, and `--fixtures`
+to relocate state.
+
+The eval-only ablations are not product switches: `--no-verifier` and
+`--no-approval-gates` exist only on `eval`. Neither exists on `run`, `serve`, or
+`report`; unset, product behavior is unchanged.
+
+### Honest failure cases
+
+- The two probes are constructed to overclaim; they are not sampled from live
+  model traffic. A 2/2 detection rate demonstrates the mechanism, not a
+  benchmark score.
+- The Verifier only catches what the Task Pack contract checks. A defect outside
+  the contract — a plausible but wrong payment date, for example — passes.
+- The eval replays committed fixtures, so it measures the engine and Task Packs,
+  not live model quality. Changing prompts or the Company Context invalidates
+  the fixtures until re-recorded.
+
+Replay fixtures for every baseline and ablation pass are committed under
+`evals/fixtures/llm`. After a prompt or Company Context change, refresh them with:
+
+```bash
+uv run python scripts/record_eval_fixtures.py
+```
+
 ## Tests
 
 ```bash
@@ -226,20 +258,7 @@ missing purchase order, over-limit approval, forbidden action, transient write
 failure, and an image-only scanned invoice. Seeded vendor-onboarding scenarios:
 a new vendor, a duplicate vendor, and a missing tax form.
 
-## Architecture in one minute
-
-```
-Request ──► CLI | Dashboard ──► Orchestrator
-                                created → resolving → planned →
-                                executing → verifying → completed
-                                (awaiting_approval at Approval Gates;
-                                 needs_human, failed, limit_reached)
-                                   │                      │
-                              Tool Layer               Verifier
-                        browser / files / mail / erp   reads ground truth
-                                   │                      │
-                              Mock Suite: MailDesk, LedgerLite, shared files
-```
+## How it works
 
 - **Engine** — a custom state machine. Observe happens inside `executing`: a
   ReAct-style loop runs one Step at a time — think, call one tool, observe.
@@ -259,9 +278,7 @@ Request ──► CLI | Dashboard ──► Orchestrator
 - **Run store** — SQLite: run state, checkpoints, an action journal with
   idempotency keys, observations, and the Evidence Pack index.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
-
-## Key technical decisions
+### Key technical decisions
 
 Each decision and its trade-offs is recorded as an ADR in
 [`docs/adr/`](docs/adr/):
@@ -275,7 +292,7 @@ Each decision and its trade-offs is recorded as an ADR in
 | [0005](docs/adr/0005-browser-regrounding.md) | Browser re-grounding: a stale ref is re-resolved by role and name, a control the tree lacks goes to the vision fallback, and the locator used is journaled. |
 | [0006](docs/adr/0006-eval-only-ablations.md) | Eval-only switches disable the Verifier or the Approval Gates; the harness reports caught vs undetected failures and gated vs ungated irreversible actions. |
 
-## Models and APIs
+### Models and APIs
 
 The LLM layer is an OpenAI-compatible chat-completions client configured
 entirely from `.env` (see [`.env.example`](.env.example)). No other network API
@@ -300,7 +317,7 @@ prices live in `src/verirun/config.py` and drive the cost meter.
 (`uv run python scripts/record_llm_fixtures.py`) refreshes them when prompts or
 the Company Context change.
 
-## Assumptions
+### Assumptions
 
 - The sandbox has no real third-party systems: MailDesk, LedgerLite, and the
   shared file tree stand in for the mailbox, ERP, and document store.
@@ -314,22 +331,37 @@ the Company Context change.
 
 ## Known limitations
 
-- Browser control prefers the accessibility tree. A UI change invalidates refs,
-  but the tool re-grounds a stale ref by role and accessible name and falls back
-  to the vision model for a control the tree lacks; canvas-only or unlabeled
-  widgets remain the hardest case.
-- No native desktop GUI control; only the browser is driven — through the
-  accessibility tree with a vision fallback — and the file tools.
-- No real external systems, credentials, payments, email sending, or network
-  writes — all effects are simulated in the Mock Suite.
-- No authentication, multi-tenancy, or cloud deployment; the dashboard binds to
-  localhost.
-- Task coverage is limited to the two demonstrated Task Packs.
-- No learning or long-term memory beyond committed precedent documents.
-- Replay fixtures are keyed by a hash of the exact request; changing the
-  Company Context or prompts invalidates them until re-recorded.
-- The static `evidence.html` is a snapshot of a Run directory; screenshots are
-  inlined as recorded.
+What is not built:
+
+- **Real external systems.** MailDesk, LedgerLite, and the shared file tree are
+  mocks. Payments are scheduled, not transferred; no email is sent; no network
+  writes happen outside the local Mock Suite.
+- **Authentication, authorization, multi-tenancy, or cloud deployment.** The
+  dashboard binds to localhost and has no login or tenant boundary.
+- **A queue, scheduler, or parallel execution.** One process runs one Request at
+  a time; there is no worker pool, cron, or cross-process supervisor.
+- **Task coverage beyond the two Task Packs** (`invoice-processing` and
+  `vendor-onboarding`). New work means a new Task Pack, not a general-purpose
+  agent.
+- **Learning or long-term memory.** Precedents are committed documents; a Run
+  never writes one.
+- **A fallback LLM provider.** There is one OpenAI-compatible chat-completions
+  client, no provider failover.
+- **Native desktop GUI automation.** Only the browser is driven through
+  Playwright, plus the file, mail, and ERP tools. Canvas-only or unlabeled
+  widgets have no reliable path; the vision fallback is best-effort.
+- **A published package or container image.** Run from a checkout; there is no
+  PyPI release or Docker image.
+- **A public benchmark or leaderboard.** The eval is a committed harness over
+  twelve seeded scenarios, not a benchmark of model quality.
+- **A live trace viewer.** `evidence.html` is a snapshot of a Run directory;
+  screenshots are inlined as recorded.
+- **Defects outside the verification contract.** The Verifier only checks the
+  Task Pack's declared criteria; a plausible but wrong payment date, for
+  example, passes.
+- **Stable replay across prompt changes.** Fixtures are keyed by a hash of the
+  exact request; changing the Company Context or prompts invalidates them until
+  re-recorded.
 
 ## What I'd build next
 
@@ -351,6 +383,7 @@ With two more weeks, in priority order:
 
 ```
 src/verirun/
+├── demo.py        # the one-command demo (also scripts/demo.py)
 ├── engine/        # state machine, planner, executor, verifier, adaptation
 ├── context/       # Company Context loader, Work Order, Task Packs
 ├── llm/           # OpenAI-compatible client, replay, cost meter
@@ -360,9 +393,9 @@ src/verirun/
 mocks/             # MailDesk, LedgerLite, seed data
 company/           # SOPs, policies, system registry, precedents
 tasks/             # Task Packs (YAML)
-scripts/           # seed, serve, demo, fixture recording
+scripts/           # seed, serve, fixture recording, demo recording
 tests/             # integration, acceptance, and unit tests
-docs/              # architecture and ADRs
+docs/              # architecture, ADRs, sample Evidence Pack, recording
 ```
 
 ## Contributing

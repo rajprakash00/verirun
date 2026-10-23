@@ -12,8 +12,31 @@ def test_help_lists_all_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert excinfo.value.code == 0
     output = capsys.readouterr().out
-    for command in ("run", "serve", "report"):
+    for command in ("run", "serve", "report", "eval", "demo"):
         assert command in output
+
+
+def test_demo_command_seeds_and_runs_the_demo(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(
+        [
+            "demo",
+            "--state-dir",
+            str(tmp_path / "state"),
+            "--shared",
+            str(tmp_path / "shared"),
+            "--runs",
+            str(tmp_path / "runs"),
+            "--no-browser",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "Demo complete" in output
+    assert (tmp_path / "state" / "ledgerlite.db").is_file()
+    assert (tmp_path / "state" / "maildesk.db").is_file()
 
 
 def test_run_requires_a_request(capsys: pytest.CaptureFixture[str]) -> None:
