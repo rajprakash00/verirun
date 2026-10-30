@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from verirun.adapters import AccountingReads
 from verirun.config import DEFAULT_MAX_COST_USD, DEFAULT_MAX_STEPS, ModelPrice
 from verirun.context.company import CompanyContext
 from verirun.context.task_pack import TaskPack, TaskPackError
@@ -82,7 +83,7 @@ def run_task(
     store: RunStore,
     registry: ToolRegistry,
     *,
-    erp_db_path: str | Path,
+    accounting: AccountingReads,
     shared_root: str | Path,
     evidence_root: str | Path,
     max_steps: int = DEFAULT_MAX_STEPS,
@@ -118,7 +119,7 @@ def run_task(
                 task_pack,
                 store,
                 client=client,
-                erp_db_path=erp_db_path,
+                accounting=accounting,
                 shared_root=shared_root,
                 verifier=verifier,
             )
@@ -138,7 +139,7 @@ def resume_run(
     store: RunStore,
     registry: ToolRegistry,
     *,
-    erp_db_path: str | Path,
+    accounting: AccountingReads,
     shared_root: str | Path,
     evidence_root: str | Path,
     max_steps: int = DEFAULT_MAX_STEPS,
@@ -176,7 +177,7 @@ def resume_run(
             task_pack,
             store,
             client=client,
-            erp_db_path=erp_db_path,
+            accounting=accounting,
             shared_root=shared_root,
             verifier=verifier,
         )
@@ -191,7 +192,7 @@ def _verify_or_accept(
     store: RunStore,
     *,
     client: LLMClient,
-    erp_db_path: str | Path,
+    accounting: AccountingReads,
     shared_root: str | Path,
     verifier: bool,
 ) -> Run:
@@ -200,7 +201,7 @@ def _verify_or_accept(
             run.id,
             task_pack,
             store,
-            erp_db_path=erp_db_path,
+            accounting=accounting,
             shared_root=shared_root,
             client=client,
         )

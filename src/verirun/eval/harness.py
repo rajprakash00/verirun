@@ -41,7 +41,7 @@ from verirun.eval.scenarios import SCENARIOS, SILENT_FAILURE_SCENARIOS, Scenario
 from verirun.llm.client import LLMClient, ReplayClient
 from verirun.runs.models import ObservationRecord, Run
 from verirun.runs.store import RunStore
-from verirun.runtime import build_registry
+from verirun.runtime import Backends, build_registry
 from verirun.tools import BrowserSession
 
 LEDGERLITE_PORT = 8002
@@ -372,11 +372,13 @@ def _drive_scenario(
             prices=settings.prices,
         )
     try:
+        backends = Backends.mock_suite(settings)
         registry = build_registry(
             settings,
             context,
             task_pack,
             client,
+            backends=backends,
             browser=session,
             approval_gates=approval_gates,
         )
@@ -387,8 +389,8 @@ def _drive_scenario(
             client,
             store,
             registry,
-            erp_db_path=settings.erp_db,
-            shared_root=settings.shared_dir,
+            accounting=backends.verifier_accounting,
+            shared_root=backends.mail.document_root,
             evidence_root=evidence_root,
             run_id=scenario.run_id,
             verifier=verifier,
@@ -407,8 +409,8 @@ def _drive_scenario(
                     client,
                     store,
                     registry,
-                    erp_db_path=settings.erp_db,
-                    shared_root=settings.shared_dir,
+                    accounting=backends.verifier_accounting,
+                    shared_root=backends.mail.document_root,
                     evidence_root=evidence_root,
                     verifier=verifier,
                     write_evidence=verifier,

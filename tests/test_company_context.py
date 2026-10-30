@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from verirun.adapters import MockAccountingSystem, MockMailSource
 from verirun.context.company import (
     CompanyContextError,
     load_company_context,
@@ -153,8 +154,8 @@ def test_shipped_policies_reference_only_real_tool_actions(tmp_path: Path) -> No
         tool.action
         for tool in (
             *build_file_tools(tmp_path),
-            *build_mail_tools(tmp_path / "maildesk.db", tmp_path),
-            *build_erp_tools(tmp_path / "ledgerlite.db"),
+            *build_mail_tools(MockMailSource(tmp_path / "maildesk.db", tmp_path)),
+            *build_erp_tools(MockAccountingSystem(tmp_path / "ledgerlite.db")),
         )
         if tool.action is not None
     }

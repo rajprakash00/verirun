@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from verirun.adapters import MockMailSource
 from verirun.tools import ToolRegistry
 from verirun.tools.mail import build_mail_tools
 
 
 def registry(db_path: Path, shared_root: Path) -> ToolRegistry:
     return ToolRegistry(
-        build_mail_tools(db_path, shared_root),
+        build_mail_tools(MockMailSource(db_path, shared_root)),
         allowlist=["mail.list", "mail.read", "mail.mark_read"],
     )
 
@@ -91,7 +92,9 @@ def test_mark_read_rejects_an_unknown_message(maildesk_state) -> None:
 
 
 def test_mutating_mail_tool_is_a_journaled_side_effect(maildesk_state) -> None:
-    tools = build_mail_tools(maildesk_state.db_path, maildesk_state.shared_root)
+    tools = build_mail_tools(
+        MockMailSource(maildesk_state.db_path, maildesk_state.shared_root)
+    )
     by_name = {tool.name: tool for tool in tools}
 
     assert by_name["mail.mark_read"].side_effect

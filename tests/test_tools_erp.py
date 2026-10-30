@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mocks.ledgerlite import db
+from verirun.adapters import MockAccountingSystem
 from verirun.tools import ToolRegistry
 from verirun.tools.erp import build_erp_tools
 
@@ -26,7 +27,7 @@ ALL_TOOLS = [
 
 
 def registry(db_path: Path) -> ToolRegistry:
-    return ToolRegistry(build_erp_tools(db_path), allowlist=ALL_TOOLS)
+    return ToolRegistry(build_erp_tools(MockAccountingSystem(db_path)), allowlist=ALL_TOOLS)
 
 
 def fetch(db_path: Path, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
@@ -249,7 +250,7 @@ def test_schedule_payment_rejects_an_unknown_invoice_and_a_partial_amount(
 
 
 def test_schedule_payment_policy_facts_read_the_vendor_status(ledgerlite_db: Path) -> None:
-    tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
+    tools = {tool.name: tool for tool in build_erp_tools(MockAccountingSystem(ledgerlite_db))}
 
     facts = tools["erp.schedule_payment"].policy_facts(
         {"invoice_id": "INV-3002", "amount": 640.00, "currency": "USD"}
@@ -322,7 +323,7 @@ def test_create_vendor_rejects_a_duplicate_tax_id_or_name(ledgerlite_db: Path) -
 
 
 def test_create_vendor_policy_facts_name_the_system(ledgerlite_db: Path) -> None:
-    tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
+    tools = {tool.name: tool for tool in build_erp_tools(MockAccountingSystem(ledgerlite_db))}
 
     facts = tools["erp.create_vendor"].policy_facts(
         {"name": "Cascade Fabrication LLC", "tax_id": "TAX-2001", "email": "x@example.com"}
@@ -332,7 +333,7 @@ def test_create_vendor_policy_facts_name_the_system(ledgerlite_db: Path) -> None
 
 
 def test_mutating_erp_tools_are_journaled_side_effects(ledgerlite_db: Path) -> None:
-    tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
+    tools = {tool.name: tool for tool in build_erp_tools(MockAccountingSystem(ledgerlite_db))}
 
     assert tools["erp.file_invoice"].side_effect
     assert tools["erp.schedule_payment"].side_effect
@@ -343,7 +344,7 @@ def test_mutating_erp_tools_are_journaled_side_effects(ledgerlite_db: Path) -> N
 
 
 def test_scheduling_a_payment_is_marked_irreversible(ledgerlite_db: Path) -> None:
-    tools = {tool.name: tool for tool in build_erp_tools(ledgerlite_db)}
+    tools = {tool.name: tool for tool in build_erp_tools(MockAccountingSystem(ledgerlite_db))}
 
     assert tools["erp.schedule_payment"].irreversible
     assert tools["erp.create_vendor"].irreversible

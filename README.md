@@ -58,6 +58,8 @@ Request ──► CLI | Dashboard ──► Orchestrator
                               Tool Layer               Verifier
                         browser / files / mail / erp   reads ground truth
                                    │                      │
+                              Adapters: MailSource + AccountingSystem
+                                   │                      │
                               Mock Suite: MailDesk, LedgerLite, shared files
 ```
 
@@ -66,8 +68,9 @@ retry → alternate strategy → re-plan → escalate. **Task Packs** (`tasks/*.
 declare the tool allowlist, approval rules, and verification contract, so the
 engine contains no task-specific logic. The **Company Context** (`company/`)
 supplies the SOPs, policies, system registry, and precedents. The **Verifier**
-reads LedgerLite state and the filesystem, never the executor's messages or
-screenshots. Every Run, verified or not, leaves an **Evidence Pack**.
+reads the system of record through a read-only adapter and the filesystem,
+never the executor's messages or screenshots. Every Run, verified or not,
+leaves an **Evidence Pack**.
 
 Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the state machine, failure
 ladder, and trust boundaries.
@@ -271,10 +274,11 @@ a new vendor, a duplicate vendor, and a missing tax form.
 - **Company Context** (`company/`) — committed SOPs, policies, system registry,
   and precedents. The Work Order resolves ambiguity from it or escalates the gap.
 - **Tools** — one uniform interface. The browser is real Playwright; the ERP and
-  mail tools read and write the mock systems' SQLite state.
+  mail tools talk to `AccountingSystem` and `MailSource` adapters, implemented
+  by the Mock Suite and the in-memory fake.
 - **Verifier** — reads the Task Pack's contract and checks real state through
-  the LedgerLite database and the filesystem. It never reads the executor's
-  messages and never trusts a screenshot.
+  the read-only `AccountingReads` adapter and the filesystem. It never reads
+  the executor's messages and never trusts a screenshot.
 - **Run store** — SQLite: run state, checkpoints, an action journal with
   idempotency keys, observations, and the Evidence Pack index.
 
@@ -291,6 +295,7 @@ Each decision and its trade-offs is recorded as an ADR in
 | [0004](docs/adr/0004-replay-brain-for-deterministic-tests.md) | A provider-agnostic client with record/replay fixtures and a scripted test client, so tests are deterministic, offline, and free. |
 | [0005](docs/adr/0005-browser-regrounding.md) | Browser re-grounding: a stale ref is re-resolved by role and name, a control the tree lacks goes to the vision fallback, and the locator used is journaled. |
 | [0006](docs/adr/0006-eval-only-ablations.md) | Eval-only switches disable the Verifier or the Approval Gates; the harness reports caught vs undetected failures and gated vs ungated irreversible actions. |
+| [0007](docs/adr/0007-mail-and-accounting-adapters.md) | `MailSource` and `AccountingSystem` adapters separate the engine from MailDesk and LedgerLite; the Verifier gets read-only accounting access, and an in-memory fake backs engine tests. |
 
 ### Models and APIs
 
@@ -384,6 +389,7 @@ With two more weeks, in priority order:
 ```
 src/verirun/
 ├── demo.py        # the one-command demo (also scripts/demo.py)
+├── adapters/      # MailSource + AccountingSystem seams, Mock Suite and in-memory fakes
 ├── engine/        # state machine, planner, executor, verifier, adaptation
 ├── context/       # Company Context loader, Work Order, Task Packs
 ├── llm/           # OpenAI-compatible client, replay, cost meter

@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
+from verirun.adapters import (
+    AccountingReads,
+    AccountingSystem,
+    MailSource,
+    MockAccountingSystem,
+    MockMailSource,
+)
 from verirun.config import Settings
 from verirun.context.company import CompanyContext
 from verirun.context.task_pack import SCAN_TOOL, TaskPack
@@ -21,12 +29,39 @@ from verirun.tools import (
 from verirun.tools.vision import ExtractInvoiceTool
 
 
+@dataclass(frozen=True)
+class Backends:
+    """The external systems one Run works against.
+
+    The product path swaps these for an IMAP mail source and a Zoho Books
+    accounting system; the Mock Suite wiring stays the default for the demo,
+    eval, dashboard, and CLI.
+    """
+
+    mail: MailSource
+    accounting: AccountingSystem
+    reads: AccountingReads | None = None
+
+    @property
+    def verifier_accounting(self) -> AccountingReads:
+        """What the Verifier reads: the read-only side when one is configured."""
+        return self.reads if self.reads is not None else self.accounting
+
+    @classmethod
+    def mock_suite(cls, settings: Settings) -> Backends:
+        return cls(
+            mail=MockMailSource(settings.mail_db, settings.shared_dir),
+            accounting=MockAccountingSystem(settings.erp_db),
+        )
+
+
 def build_registry(
     settings: Settings,
     context: CompanyContext,
     task_pack: TaskPack,
     client: LLMClient | None = None,
     *,
+    backends: Backends,
     browser: BrowserSession | None = None,
     approval_gates: bool = True,
 ) -> ToolRegistry:
@@ -37,10 +72,11 @@ def build_registry(
     eval-only ablation switch: policy denials still apply, but approval rules
     execute instead of parking the Run.
     """
+    root = backends.mail.document_root
     tools = [
-        *build_file_tools(settings.shared_dir),
-        *build_mail_tools(settings.mail_db, settings.shared_dir),
-        *build_erp_tools(settings.erp_db),
+        *build_file_tools(root),
+        *build_mail_tools(backends.mail),
+        *build_erp_tools(backends.accounting),
     ]
     if browser is not None:
         tools.extend(build_browser_tools(browser))
@@ -52,7 +88,7 @@ def build_registry(
             )
         tools.append(
             ExtractInvoiceTool(
-                settings.shared_dir,
+                root,
                 client,
                 confidence_threshold=task_pack.extraction.confidence_threshold,
                 prices=settings.prices,
@@ -72,6 +108,8 @@ def live_registry(
     task_pack: TaskPack,
     client: LLMClient,
     run_id: str,
+    *,
+    backends: Backends,
 ) -> Iterator[ToolRegistry]:
     """The registry for a live Run, shared by the CLI and the dashboard.
 
@@ -87,6 +125,13 @@ def live_registry(
         prices=settings.prices,
     )
     try:
-        yield build_registry(settings, context, task_pack, client, browser=session)
+        yield build_registry(
+            settings,
+            context,
+            task_pack,
+            client,
+            backends=backends,
+            browser=session,
+        )
     finally:
         session.close()

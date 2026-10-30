@@ -1,7 +1,7 @@
 """Verify: check a Run's outcome against ground truth, independently of the doer.
 
-The Verifier reads the Task Pack's verification contract and inspects the real
-LedgerLite database and the shared file tree. It never reads the executor's
+The Verifier reads the Task Pack's verification contract, the read-only
+accounting adapter, and the shared file tree. It never reads the executor's
 messages and never trusts screenshots. Every check returns pass/fail with
 evidence references; the Run completes only when every criterion passes.
 """
@@ -9,14 +9,23 @@ evidence references; the Run completes only when every criterion passes.
 from __future__ import annotations
 
 import re
-import sqlite3
 from collections.abc import Callable
-from contextlib import closing, suppress
+from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from verirun.adapters import (
+    AccountingReads,
+    Approval,
+    Bill,
+    GoodsReceipt,
+    NotFoundError,
+    Payment,
+    PurchaseOrder,
+    Vendor,
+)
 from verirun.context.task_pack import TaskPack
 from verirun.engine.models import CheckResult
 from verirun.engine.states import RunState
@@ -24,6 +33,9 @@ from verirun.llm.client import LLMClient
 from verirun.runs.models import JournalEntry, Run
 from verirun.runs.store import RunStore
 from verirun.tools.vision import read_scanned_invoice
+
+LIVE_BILL_STATUSES = frozenset({"received", "approved", "paid"})
+PAYMENT_STATUSES = frozenset({"scheduled", "paid"})
 
 FILE_FIELD = re.compile(r"^Vendor:\s*(.+)$", re.MULTILINE)
 NUMBER_FIELD = re.compile(r"^Invoice number:\s*(\S+)$", re.MULTILINE)
@@ -47,11 +59,11 @@ class CheckOutcome:
 
 @dataclass(frozen=True)
 class VerificationContext:
-    """Everything a check may read: the Run record and ground-truth locations."""
+    """Everything a check may read: the Run record and ground-truth sources."""
 
     run: Run
     store: RunStore
-    erp_db_path: Path
+    accounting: AccountingReads
     shared_root: Path
     confidence_threshold: float | None = None
     client: LLMClient | None = None
@@ -71,31 +83,62 @@ def _claims(context: VerificationContext, action: str) -> list[JournalEntry]:
 
 def _invoice_for_claim(
     context: VerificationContext, entry: JournalEntry
-) -> tuple[dict[str, Any] | None, str | None]:
-    """Resolve the LedgerLite row a filing claim names, or explain why it cannot."""
+) -> tuple[Bill | None, str | None]:
+    """Resolve the system-of-record bill a filing claim names, or explain why it cannot."""
     payload = entry.payload or {}
     number = payload.get("number")
     vendor_id = payload.get("vendor_id")
     if not isinstance(number, str) or not isinstance(vendor_id, str):
         return None, f"{entry.key}: the filing action names no invoice number or vendor"
-    rows = _erp_rows(
-        context,
-        "SELECT * FROM invoices WHERE number = ? AND vendor_id = ?",
-        (number, vendor_id),
-    )
-    if len(rows) != 1:
+    bills = _bills(context, number=number, vendor_id=vendor_id)
+    if len(bills) != 1:
         return None, (
-            f"LedgerLite has {len(rows)} invoice(s) numbered {number} for {vendor_id}, expected one"
+            f"{context.accounting.display_name} has {len(bills)} invoice(s) numbered "
+            f"{number} for {vendor_id}, expected one"
         )
-    return rows[0], None
+    return bills[0], None
 
 
-def _erp_rows(context: VerificationContext, sql: str, params: tuple[Any, ...] = ()) -> list[dict]:
-    if not context.erp_db_path.is_file():
+def _bills(context: VerificationContext, **filters: str) -> list[Bill]:
+    try:
+        return context.accounting.list_bills(**filters)
+    except NotFoundError:
         return []
-    with closing(sqlite3.connect(context.erp_db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        return [dict(row) for row in conn.execute(sql, params)]
+
+
+def _vendors(context: VerificationContext, **filters: str) -> list[Vendor]:
+    try:
+        return context.accounting.find_vendors(**filters)
+    except NotFoundError:
+        return []
+
+
+def _purchase_order(context: VerificationContext, po_id: str) -> PurchaseOrder | None:
+    try:
+        return context.accounting.get_purchase_order(po_id)
+    except NotFoundError:
+        return None
+
+
+def _goods_receipt(context: VerificationContext, gr_id: str) -> GoodsReceipt | None:
+    try:
+        return context.accounting.get_goods_receipt(gr_id)
+    except NotFoundError:
+        return None
+
+
+def _payments(context: VerificationContext, bill_id: str) -> list[Payment]:
+    try:
+        return context.accounting.list_payments(bill_id)
+    except NotFoundError:
+        return []
+
+
+def _pending_approval(context: VerificationContext, bill_id: str) -> Approval | None:
+    try:
+        return context.accounting.find_pending_approval(bill_id)
+    except NotFoundError:
+        return None
 
 
 def _find_source(context: VerificationContext, number: str) -> Path | None:
@@ -153,7 +196,7 @@ def _verifier_scan(
 def check_erp_invoice_matches(
     params: dict[str, Any], context: VerificationContext
 ) -> CheckOutcome:
-    """Each filed invoice agrees with its source document and LedgerLite records."""
+    """Each filed invoice agrees with its source document and system-of-record bill."""
     match_fields = params.get("match") or ["vendor_id", "invoice_number", "amount_cents"]
     claims = _claims(context, "erp.file_invoice")
     if not claims:
@@ -165,12 +208,13 @@ def check_erp_invoice_matches(
         if problem is not None:
             failures.append(problem)
             continue
-        if invoice["status"] not in ("received", "approved", "paid"):
-            failures.append(f"{invoice['id']}: status '{invoice['status']}' is not a live invoice")
+        assert invoice is not None
+        if invoice.status not in LIVE_BILL_STATUSES:
+            failures.append(f"{invoice.id}: status '{invoice.status}' is not a live invoice")
             continue
-        source = _find_source(context, invoice["number"])
+        source = _find_source(context, invoice.number)
         if source is None:
-            failures.append(f"no source document found for invoice {invoice['number']}")
+            failures.append(f"no source document found for invoice {invoice.number}")
             continue
         reference = source.relative_to(context.shared_root).as_posix()
         extraction_evidence: str | None = None
@@ -186,66 +230,67 @@ def check_erp_invoice_matches(
             assert minimum is not None
             extraction_evidence = f"extraction:{reference}@{minimum:.2f}"
         assert parsed is not None
-        if "invoice_number" in match_fields and parsed["number"] != invoice["number"]:
+        if "invoice_number" in match_fields and parsed["number"] != invoice.number:
             failures.append(
-                f"{invoice['id']}: LedgerLite number {invoice['number']} != source {parsed['number']}"
+                f"{invoice.id}: {context.accounting.display_name} number {invoice.number} "
+                f"!= source {parsed['number']}"
             )
-        if "amount_cents" in match_fields and parsed["amount_cents"] != invoice["amount_cents"]:
+        if "amount_cents" in match_fields and parsed["amount_cents"] != invoice.amount_cents:
             failures.append(
-                f"{invoice['id']}: LedgerLite amount {invoice['amount_cents'] / 100:,.2f} "
+                f"{invoice.id}: {context.accounting.display_name} amount "
+                f"{invoice.amount_cents / 100:,.2f} "
                 f"!= source amount {parsed['amount_cents'] / 100:,.2f}"
             )
         if "vendor_id" in match_fields:
-            vendors = _erp_rows(context, "SELECT * FROM vendors WHERE name = ?", (parsed["vendor"],))
-            if len(vendors) != 1 or vendors[0]["id"] != invoice["vendor_id"]:
+            vendors = _vendors(context, name=parsed["vendor"])
+            if len(vendors) != 1 or vendors[0].id != invoice.vendor_id:
                 failures.append(
-                    f"{invoice['id']}: source vendor {parsed['vendor']!r} does not resolve to "
-                    f"{invoice['vendor_id']}"
+                    f"{invoice.id}: source vendor {parsed['vendor']!r} does not resolve to "
+                    f"{invoice.vendor_id}"
                 )
         failures.extend(_reference_failures(context, invoice))
-        if not any(failure.startswith(invoice["id"]) for failure in failures):
-            evidence.extend([f"erp:{invoice['id']}", f"source:{reference}"])
+        if not any(failure.startswith(invoice.id) for failure in failures):
+            evidence.extend([f"erp:{invoice.id}", f"source:{reference}"])
             if extraction_evidence is not None:
                 evidence.append(extraction_evidence)
     if failures:
         return CheckOutcome(False, "; ".join(failures), tuple(evidence))
     return CheckOutcome(
         True,
-        f"{len(claims)} filed invoice(s) agree with their source documents and LedgerLite records",
+        f"{len(claims)} filed invoice(s) agree with their source documents and "
+        f"{context.accounting.display_name} records",
         tuple(evidence),
     )
 
 
-def _reference_failures(context: VerificationContext, invoice: dict[str, Any]) -> list[str]:
+def _reference_failures(context: VerificationContext, invoice: Bill) -> list[str]:
     """A filed invoice must agree with its purchase order and goods receipt."""
     failures: list[str] = []
-    if invoice["po_id"]:
-        orders = _erp_rows(context, "SELECT * FROM purchase_orders WHERE id = ?", (invoice["po_id"],))
-        if len(orders) != 1:
-            failures.append(f"{invoice['id']}: purchase order {invoice['po_id']} is missing")
-        elif orders[0]["vendor_id"] != invoice["vendor_id"]:
+    if invoice.po_id:
+        order = _purchase_order(context, invoice.po_id)
+        if order is None:
+            failures.append(f"{invoice.id}: purchase order {invoice.po_id} is missing")
+        elif order.vendor_id != invoice.vendor_id:
             failures.append(
-                f"{invoice['id']}: purchase order {invoice['po_id']} belongs to another vendor"
+                f"{invoice.id}: purchase order {invoice.po_id} belongs to another vendor"
             )
-        elif orders[0]["amount_cents"] != invoice["amount_cents"]:
+        elif order.amount_cents != invoice.amount_cents:
             failures.append(
-                f"{invoice['id']}: amount {invoice['amount_cents'] / 100:,.2f} does not match "
-                f"purchase order {invoice['po_id']}"
+                f"{invoice.id}: amount {invoice.amount_cents / 100:,.2f} does not match "
+                f"purchase order {invoice.po_id}"
             )
-    if invoice["gr_id"]:
-        receipts = _erp_rows(
-            context, "SELECT * FROM goods_receipts WHERE id = ?", (invoice["gr_id"],)
-        )
-        if len(receipts) != 1:
-            failures.append(f"{invoice['id']}: goods receipt {invoice['gr_id']} is missing")
-        elif invoice["po_id"] and receipts[0]["po_id"] != invoice["po_id"]:
+    if invoice.gr_id:
+        receipt = _goods_receipt(context, invoice.gr_id)
+        if receipt is None:
+            failures.append(f"{invoice.id}: goods receipt {invoice.gr_id} is missing")
+        elif invoice.po_id and receipt.po_id != invoice.po_id:
             failures.append(
-                f"{invoice['id']}: goods receipt {invoice['gr_id']} belongs to another purchase order"
+                f"{invoice.id}: goods receipt {invoice.gr_id} belongs to another purchase order"
             )
-        elif receipts[0]["amount_cents"] != invoice["amount_cents"]:
+        elif receipt.amount_cents != invoice.amount_cents:
             failures.append(
-                f"{invoice['id']}: amount {invoice['amount_cents'] / 100:,.2f} does not match "
-                f"goods receipt {invoice['gr_id']}"
+                f"{invoice.id}: amount {invoice.amount_cents / 100:,.2f} does not match "
+                f"goods receipt {invoice.gr_id}"
             )
     return failures
 
@@ -263,34 +308,30 @@ def check_erp_payment_state(params: dict[str, Any], context: VerificationContext
         if problem is not None:
             failures.append(problem)
             continue
-        invoice_id = invoice["id"]
-        payments = _erp_rows(
-            context,
-            "SELECT * FROM payments WHERE invoice_id = ? AND status IN ('scheduled', 'paid')",
-            (invoice_id,),
-        )
+        assert invoice is not None
+        invoice_id = invoice.id
+        payments = [
+            payment
+            for payment in _payments(context, invoice_id)
+            if payment.status in PAYMENT_STATUSES
+        ]
         covering = [
-            payment for payment in payments if payment["amount_cents"] == invoice["amount_cents"]
+            payment for payment in payments if payment.amount_cents == invoice.amount_cents
         ]
         if covering:
-            evidence.append(f"payment:{covering[0]['id']}:{covering[0]['status']}")
+            evidence.append(f"payment:{covering[0].id}:{covering[0].status}")
             continue
         if payments:
             failures.append(
-                f"invoice {invoice_id}: payment {payments[0]['id']} covers "
-                f"{payments[0]['amount_cents'] / 100:,.2f} of "
-                f"{invoice['amount_cents'] / 100:,.2f}"
+                f"invoice {invoice_id}: payment {payments[0].id} covers "
+                f"{payments[0].amount_cents / 100:,.2f} of "
+                f"{invoice.amount_cents / 100:,.2f}"
             )
             continue
         if allow_pending:
-            approvals = _erp_rows(
-                context,
-                "SELECT * FROM approvals WHERE subject_type = 'invoice' AND subject_id = ? "
-                "AND status = 'pending'",
-                (invoice_id,),
-            )
-            if approvals:
-                evidence.append(f"approval:{approvals[0]['id']}:pending")
+            approval = _pending_approval(context, invoice_id)
+            if approval is not None:
+                evidence.append(f"approval:{approval.id}:pending")
                 continue
         expected = "a scheduled payment or a pending approval" if allow_pending else "a scheduled payment"
         failures.append(f"invoice {invoice_id} has neither {expected}")
@@ -339,16 +380,19 @@ def check_file_archived(params: dict[str, Any], context: VerificationContext) ->
 
 def _vendor_for_claim(
     context: VerificationContext, entry: JournalEntry
-) -> tuple[dict[str, Any] | None, str | None]:
-    """Resolve the LedgerLite row a vendor creation claim names."""
+) -> tuple[Vendor | None, str | None]:
+    """Resolve the system-of-record vendor a vendor creation claim names."""
     data = (entry.result or {}).get("data") or {}
     vendor_id = data.get("vendor_id")
     if not isinstance(vendor_id, str) or not vendor_id:
         return None, f"{entry.key}: the creation action names no vendor id"
-    rows = _erp_rows(context, "SELECT * FROM vendors WHERE id = ?", (vendor_id,))
-    if len(rows) != 1:
-        return None, f"LedgerLite has {len(rows)} vendor(s) with id {vendor_id}, expected one"
-    return rows[0], None
+    try:
+        vendor = context.accounting.get_vendor(vendor_id)
+    except NotFoundError:
+        return None, (
+            f"{context.accounting.display_name} has 0 vendor(s) with id {vendor_id}, expected one"
+        )
+    return vendor, None
 
 
 def _parse_tax_form(path: Path) -> dict[str, str]:
@@ -405,22 +449,19 @@ def check_erp_vendor_matches(
         if problem is not None:
             failures.append(problem)
             continue
-        vendor_id = vendor["id"]
-        duplicates = _erp_rows(
-            context,
-            "SELECT * FROM vendors WHERE tax_id = ? OR name = ?",
-            (vendor["tax_id"], vendor["name"]),
-        )
-        if len(duplicates) != 1 or duplicates[0]["id"] != vendor_id:
+        assert vendor is not None
+        vendor_id = vendor.id
+        duplicates = _vendors(context, tax_id=vendor.tax_id, name=vendor.name)
+        if len(duplicates) != 1 or duplicates[0].id != vendor_id:
             failures.append(
-                f"{vendor_id}: tax id {vendor['tax_id']} or name {vendor['name']!r} "
+                f"{vendor_id}: tax id {vendor.tax_id} or name {vendor.name!r} "
                 f"appears on {len(duplicates)} vendors, expected exactly one"
             )
             continue
-        sources = _find_tax_forms(context, vendor["tax_id"])
+        sources = _find_tax_forms(context, vendor.tax_id)
         if not sources:
             failures.append(
-                f"{vendor_id}: no tax form with tax id {vendor['tax_id']} was found"
+                f"{vendor_id}: no tax form with tax id {vendor.tax_id} was found"
             )
             continue
         unreadable = [path.name for path, parsed in sources if parsed is None]
@@ -435,15 +476,16 @@ def check_erp_vendor_matches(
         if len(reads) > 1:
             failures.append(
                 f"{vendor_id}: {len(sources)} tax forms with tax id "
-                f"{vendor['tax_id']} disagree on the vendor fields"
+                f"{vendor.tax_id} disagree on the vendor fields"
             )
             continue
         source, parsed = sources[0]
         reference = source.relative_to(context.shared_root).as_posix()
         for field in match_fields:
-            if parsed.get(field) != vendor.get(field):
+            actual = getattr(vendor, field, None)
+            if parsed.get(field) != actual:
                 failures.append(
-                    f"{vendor_id}: {field} {vendor.get(field)!r} does not match "
+                    f"{vendor_id}: {field} {actual!r} does not match "
                     f"the tax form {parsed.get(field)!r}"
                 )
         if not any(failure.startswith(vendor_id) for failure in failures):
@@ -452,7 +494,8 @@ def check_erp_vendor_matches(
         return CheckOutcome(False, "; ".join(failures), tuple(evidence))
     return CheckOutcome(
         True,
-        f"{len(claims)} created vendor(s) agree with their tax forms and LedgerLite records",
+        f"{len(claims)} created vendor(s) agree with their tax forms and "
+        f"{context.accounting.display_name} records",
         tuple(evidence),
     )
 
@@ -470,7 +513,7 @@ def verify_run(
     task_pack: TaskPack,
     store: RunStore,
     *,
-    erp_db_path: str | Path,
+    accounting: AccountingReads,
     shared_root: str | Path,
     client: LLMClient | None = None,
 ) -> Run:
@@ -481,7 +524,7 @@ def verify_run(
     context = VerificationContext(
         run=run,
         store=store,
-        erp_db_path=Path(erp_db_path),
+        accounting=accounting,
         shared_root=Path(shared_root),
         confidence_threshold=(
             task_pack.extraction.confidence_threshold if task_pack.extraction else None

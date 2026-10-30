@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar
+from collections.abc import Callable
+from typing import Any, ClassVar, TypeVar
 
+from verirun.adapters import AdapterError
 from verirun.engine.models import ErrorKind, Observation
+
+T = TypeVar("T")
 
 
 class ToolError(Exception):
@@ -64,6 +68,13 @@ class Tool(ABC):
     def policy_facts(self, args: dict[str, Any]) -> dict[str, Any]:
         """Facts the policy gate needs before this tool runs. Read-only."""
         return {}
+
+    def adapter_call(self, method: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """Call an adapter and map its classified failure to a ToolError."""
+        try:
+            return method(*args, **kwargs)
+        except AdapterError as exc:
+            raise ToolError(exc.kind, exc.message, exc.data) from exc
 
     def spec(self) -> dict[str, Any]:
         """The OpenAI-compatible function definition for the LLM tool loop."""
