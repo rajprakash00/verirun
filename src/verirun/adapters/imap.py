@@ -86,6 +86,10 @@ class ImapSource(IndexedMailSource):
             for uid in self._search(conn, start):
                 raw = self._fetch(conn, uid)
                 if raw is None:
+                    last_uid = max(last_uid, uid)
+                    self.index.set_cursor(
+                        self.source_key, folder, uidvalidity, last_uid
+                    )
                     continue
                 if self._ingest(raw, folder=folder, uidvalidity=uidvalidity, uid=uid):
                     ingested += 1

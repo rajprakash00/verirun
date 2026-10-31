@@ -120,6 +120,20 @@ def test_cgst_and_sgst_must_be_present_together_and_equal() -> None:
     assert not next(r for r in unequal if r.id == "tax_split").ok
 
 
+def test_an_igst_only_invoice_passes_the_split() -> None:
+    results = validate_tax(
+        taxable_paise=1_000_000,
+        cgst_paise=None,
+        sgst_paise=None,
+        igst_paise=180_000,
+        total_paise=1_180_000,
+    )
+
+    split = next(result for result in results if result.id == "tax_split")
+    assert split.ok
+    assert "IGST 1,800.00 INR only" in split.detail
+
+
 def test_an_invoice_without_tax_components_is_allowed() -> None:
     results = validate_tax(
         taxable_paise=1_000_000,

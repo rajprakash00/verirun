@@ -132,6 +132,14 @@ def test_a_date_citation_must_name_the_same_date() -> None:
     assert ("invoice_date", "the citation does not contain the date") in problems
 
 
+def test_a_present_field_must_have_a_citation() -> None:
+    extracted = fields(total={"value": "11,800.00", "confidence": 0.98, "citation": None})
+
+    problems = citation_problems(extracted, INVOICE_TEXT)
+
+    assert ("total", "the field has no citation") in problems
+
+
 def test_an_absent_optional_field_needs_no_citation() -> None:
     extracted = fields(
         po_reference={"value": None, "confidence": 0.3, "citation": None}
@@ -188,6 +196,36 @@ def test_an_unreadable_date_is_rejected() -> None:
 
     assert excinfo.value.kind == "invalid"
     assert "invoice_date" in excinfo.value.message
+
+
+def test_an_unreadable_amount_is_rejected() -> None:
+    extracted = fields(
+        taxable_amount={
+            "value": "ten thousand",
+            "confidence": 0.9,
+            "citation": "Taxable amount: 10,000.00",
+        }
+    )
+
+    with pytest.raises(ToolError) as excinfo:
+        normalized_fields(extracted)
+
+    assert excinfo.value.kind == "invalid"
+    assert "not a number" in excinfo.value.message
+
+
+def test_a_negative_or_zero_total_is_rejected() -> None:
+    negative = fields(
+        total={"value": "-1.00", "confidence": 0.9, "citation": "Total: 11,800.00 INR"}
+    )
+    zero = fields(
+        total={"value": "0.00", "confidence": 0.9, "citation": "Total: 11,800.00 INR"}
+    )
+
+    with pytest.raises(ToolError, match="non-negative"):
+        normalized_fields(negative)
+    with pytest.raises(ToolError, match="greater than zero"):
+        normalized_fields(zero)
 
 
 def test_normalised_values_feed_the_gst_validations() -> None:

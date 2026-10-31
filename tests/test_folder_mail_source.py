@@ -135,6 +135,29 @@ def test_mark_read_is_idempotent_and_rejects_unknown_messages(tmp_path: Path) ->
         folder.read_message("MSG-999999999999")
 
 
+def test_a_missing_watched_folder_is_reported(tmp_path: Path) -> None:
+    folder = WatchedFolderSource(
+        tmp_path / "missing", tmp_path / "shared", tmp_path / "mail-index.db"
+    )
+
+    with pytest.raises(NotFoundError, match="watched folder not found"):
+        folder.sync()
+
+
+def test_a_missing_attachment_file_is_not_found(tmp_path: Path) -> None:
+    folder, shared = source(tmp_path)
+    write_invoice_pdf(tmp_path / "watch" / PDF_FILENAME)
+    folder.sync()
+    message = folder.read_message(folder.list_messages()[0].id)
+    attachment = message.attachments[0]
+    (shared / attachment.path).unlink()
+
+    with pytest.raises(NotFoundError, match="attachment file not found"):
+        folder.read_attachment(message.id, attachment.id)
+    with pytest.raises(NotFoundError):
+        folder.read_attachment(message.id, "not-an-attachment")
+
+
 def test_a_tampered_attachment_is_rejected(tmp_path: Path) -> None:
     folder, shared = source(tmp_path)
     write_invoice_pdf(tmp_path / "watch" / PDF_FILENAME)

@@ -42,6 +42,11 @@ class ImapTestServer(socketserver.ThreadingTCPServer):
         self.logins: list[tuple[str, str]] = []
         self.searches: list[str] = []
         self.fetches: list[int] = []
+        self.fail_select = False
+        self.send_uidvalidity = True
+        self.fail_search = False
+        self.fail_fetch = False
+        self.hide_fetch_uids: set[int] = set()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
 
@@ -146,8 +151,14 @@ class _ImapHandler(socketserver.StreamRequestHandler):
             return True
         subcommand = parts[0].upper()
         if subcommand == "SEARCH":
+            if self.server.fail_search:
+                self.wfile.write(f"{tag} NO SEARCH failed\r\n".encode())
+                return True
             self._search(parts[1:])
         elif subcommand == "FETCH":
+            if self.server.fail_fetch:
+                self.wfile.write(f"{tag} NO FETCH failed\r\n".encode())
+                return True
             self._fetch(parts[1:])
         elif subcommand == "STORE":
             self._store(parts[1:])
@@ -174,14 +185,18 @@ class _ImapHandler(socketserver.StreamRequestHandler):
         except ValueError:
             values = []
         mailbox = values[0] if values else ""
+        if self.server.fail_select:
+            self.wfile.write(f"{tag} NO SELECT failed\r\n".encode())
+            return
         if mailbox.upper() != "INBOX":
             self.wfile.write(f"{tag} NO [NONEXISTENT] no such mailbox\r\n".encode())
             return
         self.wfile.write(f"* {len(self.server.messages)} EXISTS\r\n".encode())
         self.wfile.write(b"* FLAGS (\\Seen)\r\n")
-        self.wfile.write(
-            f"* OK [UIDVALIDITY {self.server.uidvalidity}] UIDs valid\r\n".encode()
-        )
+        if self.server.send_uidvalidity:
+            self.wfile.write(
+                f"* OK [UIDVALIDITY {self.server.uidvalidity}] UIDs valid\r\n".encode()
+            )
         uidnext = len(self.server.messages) + 1
         self.wfile.write(f"* OK [UIDNEXT {uidnext}] Predicted next UID\r\n".encode())
         self._ok(tag, "SELECT completed", code="READ-WRITE")
@@ -197,6 +212,8 @@ class _ImapHandler(socketserver.StreamRequestHandler):
         spec = parts[0] if parts else "1:*"
         for index, message in enumerate(self.server.messages, start=1):
             if message.uid not in self._uids(spec):
+                continue
+            if message.uid in self.server.hide_fetch_uids:
                 continue
             self.server.fetches.append(message.uid)
             prefix = (
