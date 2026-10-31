@@ -12,9 +12,9 @@ compact agent runtime that plans the work, executes it with real tools, recovers
 from failures, stops at **Approval Gates** before irreversible actions, and
 **verifies the outcome against ground truth** before calling it done.
 
-One unchanged engine runs two Task Packs — invoice processing and vendor
-onboarding — against a self-contained Mock Suite. The demo is offline,
-deterministic, and needs no API key.
+One unchanged engine runs two Mock Suite Task Packs — invoice processing and
+vendor onboarding — and a Phase 1 India GST extraction pack. The demo is
+offline, deterministic, and needs no API key.
 
 - Product spec: [`SPEC.md`](SPEC.md)
 - Design document: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
@@ -151,6 +151,25 @@ Re-render the Evidence Pack for a finished Run at any time:
 uv run verirun report <run-id>
 ```
 
+### India GST mail sources (Phase 1)
+
+`verirun run` reads the Mock Suite by default. Set one of these to read a real
+mailbox instead; the CLI syncs it before the Run:
+
+| Setting | Purpose |
+| --- | --- |
+| `VERIRUN_IMAP_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, `_FOLDER`, `_SSL` | IMAP over SSL with an app password. |
+| `VERIRUN_WATCH_DIR` | A folder of invoice PDFs, no mailbox access. |
+| `VERIRUN_MAIL_STATE_DB` | Local UIDVALIDITY/UID and message index (default `runs/mail-index.db`). |
+
+Attachments are stored content-addressed under
+`VERIRUN_SHARED_DIR/attachments/`; reconnecting or a UIDVALIDITY change does not
+reprocess an ingested message. `invoice.extract` reads an India GST text-layer
+PDF with a confidence and citation per field, and records GSTIN and tax
+validations in the Evidence Pack. The India Task Pack ships extraction and
+archive today; the GST verification contract, INR approval rules, and the Zoho
+Books read/write path are the next Phase 1 tickets.
+
 ## Dashboard
 
 ```bash
@@ -275,7 +294,7 @@ a new vendor, a duplicate vendor, and a missing tax form.
   and precedents. The Work Order resolves ambiguity from it or escalates the gap.
 - **Tools** — one uniform interface. The browser is real Playwright; the ERP and
   mail tools talk to `AccountingSystem` and `MailSource` adapters, implemented
-  by the Mock Suite and the in-memory fake.
+  by the Mock Suite, the in-memory fake, an IMAP source, and a watched folder.
 - **Verifier** — reads the Task Pack's contract and checks real state through
   the read-only `AccountingReads` adapter and the filesystem. It never reads
   the executor's messages and never trusts a screenshot.
@@ -296,6 +315,7 @@ Each decision and its trade-offs is recorded as an ADR in
 | [0005](docs/adr/0005-browser-regrounding.md) | Browser re-grounding: a stale ref is re-resolved by role and name, a control the tree lacks goes to the vision fallback, and the locator used is journaled. |
 | [0006](docs/adr/0006-eval-only-ablations.md) | Eval-only switches disable the Verifier or the Approval Gates; the harness reports caught vs undetected failures and gated vs ungated irreversible actions. |
 | [0007](docs/adr/0007-mail-and-accounting-adapters.md) | `MailSource` and `AccountingSystem` adapters separate the engine from MailDesk and LedgerLite; the Verifier gets read-only accounting access, and an in-memory fake backs engine tests. |
+| [0008](docs/adr/0008-india-gst-extraction.md) | IMAP and watched-folder sources ingest into a content-addressed index; India GST extraction returns a confidence and a verified citation per field, with deterministic GSTIN and tax validations in the Evidence Pack. |
 
 ### Models and APIs
 
@@ -331,16 +351,20 @@ the Company Context change.
   can, and anything left is an open question, not a guess.
 - Verification reads ground truth (ERP records and files), never the executor's
   messages or screenshots.
-- One Run handles one Request; the two Task Packs are the demonstrated scope.
+- One Run handles one Request; the Task Packs are the demonstrated scope.
 - A human is available to answer approval gates and escalations.
 
 ## Known limitations
 
 What is not built:
 
-- **Real external systems.** MailDesk, LedgerLite, and the shared file tree are
-  mocks. Payments are scheduled, not transferred; no email is sent; no network
-  writes happen outside the local Mock Suite.
+- **Zoho Books and the India verification contract.** The product path can
+  ingest an AP mailbox over IMAP or a watched folder, and
+  `invoice-processing-in` extracts India GST fields with validations and
+  archives the source, but no Zoho Books connection exists yet; the GST
+  verification checks and INR approval rules land with the Zoho tickets.
+  MailDesk, LedgerLite, and the shared file tree stand in for the mailbox, ERP,
+  and document store; payments are scheduled, not transferred; no email is sent.
 - **Authentication, authorization, multi-tenancy, or cloud deployment.** The
   dashboard binds to localhost and has no login or tenant boundary.
 - **A queue, scheduler, or parallel execution.** One process runs one Request at
@@ -389,11 +413,12 @@ With two more weeks, in priority order:
 ```
 src/verirun/
 ├── demo.py        # the one-command demo (also scripts/demo.py)
-├── adapters/      # MailSource + AccountingSystem seams, Mock Suite and in-memory fakes
+├── adapters/      # MailSource + AccountingSystem seams, IMAP, folder, fakes
 ├── engine/        # state machine, planner, executor, verifier, adaptation
 ├── context/       # Company Context loader, Work Order, Task Packs
+├── india/         # India GST schema, GSTIN and tax validations
 ├── llm/           # OpenAI-compatible client, replay, cost meter
-├── tools/         # browser, files, mail, erp, policy gate
+├── tools/         # browser, files, mail, erp, invoice extraction, policy gate
 ├── runs/          # run store, evidence pack, evidence HTML
 └── web/           # dashboard and approval API
 mocks/             # MailDesk, LedgerLite, seed data

@@ -60,7 +60,11 @@ class UnsupportedError(AdapterError):
 
 @dataclass(frozen=True)
 class MailAttachment:
-    """One attachment. ``path`` is relative to the adapter's document root."""
+    """One attachment. ``path`` is relative to the adapter's document root.
+
+    Content-addressed sources use the SHA-256 of the bytes as the attachment
+    ``id``; the Mock Suite keeps its seeded ids.
+    """
 
     id: str
     filename: str
@@ -223,14 +227,22 @@ class Approval:
 class MailSource(ABC):
     """List, read, and open the attachments of the mailbox under work.
 
-    Implementations: the Mock Suite mailbox (MailDesk), and later IMAP and a
-    watched folder. Message and attachment ids are stable per source.
+    Implementations: the Mock Suite mailbox (MailDesk), IMAP, and a watched
+    folder. Message and attachment ids are stable per source.
     """
 
     @property
     @abstractmethod
     def document_root(self) -> Path:
         """The directory attachment paths are relative to."""
+
+    def sync(self, folder: str = "inbox") -> int:
+        """Refresh the local index from the source; return the new messages.
+
+        The Mock Suite mailbox is already materialised, so its sync is a no-op.
+        IMAP and the watched folder ingest into their own index here.
+        """
+        return 0
 
     @abstractmethod
     def list_messages(self, folder: str = "inbox") -> list[MailSummary]:

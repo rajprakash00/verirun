@@ -13,12 +13,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from verirun.context.task_pack import SCAN_TOOL
+from verirun.context.task_pack import INVOICE_EXTRACT_TOOL, SCAN_TOOL
 from verirun.engine.states import RunState
 from verirun.runs.models import ObservationRecord, Run
 from verirun.runs.store import RunStore
 
 FILE_TOOLS = {"files.write", "files.move", "files.archive"}
+EXTRACTION_TOOLS = frozenset({SCAN_TOOL, INVOICE_EXTRACT_TOOL})
+SOURCE_TOOL = "mail.read"
 
 
 def collect_artifacts(observations: list[ObservationRecord]) -> list[str]:
@@ -39,16 +41,56 @@ def collect_extractions(observations: list[ObservationRecord]) -> list[dict[str,
         {
             "path": record.data.get("path"),
             "method": record.data.get("method"),
+            "schema": record.data.get("schema"),
             "pages": record.data.get("pages"),
             "threshold": record.data.get("threshold"),
             "min_confidence": record.data.get("min_confidence"),
             "fields": record.data.get("fields"),
+            "validations": record.data.get("validations"),
             "ok": record.ok,
             "summary": record.summary,
         }
         for record in observations
-        if record.tool == SCAN_TOOL
+        if record.tool in EXTRACTION_TOOLS
     ]
+
+
+def collect_validations(observations: list[ObservationRecord]) -> list[dict[str, Any]]:
+    """Every deterministic validation a tool recorded, with its source document."""
+    validations: list[dict[str, Any]] = []
+    for record in observations:
+        for validation in record.data.get("validations") or []:
+            if not isinstance(validation, dict):
+                continue
+            validations.append(
+                {
+                    **validation,
+                    "source": record.data.get("path"),
+                    "tool": record.tool,
+                }
+            )
+    return validations
+
+
+def collect_sources(observations: list[ObservationRecord]) -> list[dict[str, Any]]:
+    """Every source message a Run read, with the attachments it carried."""
+    sources: list[dict[str, Any]] = []
+    for record in observations:
+        if record.tool != SOURCE_TOOL:
+            continue
+        data = record.data
+        sources.append(
+            {
+                "message_id": data.get("id"),
+                "folder": data.get("folder"),
+                "sender": data.get("sender"),
+                "sender_email": data.get("sender_email"),
+                "subject": data.get("subject"),
+                "received_at": data.get("received_at"),
+                "attachments": data.get("attachments") or [],
+            }
+        )
+    return sources
 
 
 def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
@@ -140,7 +182,9 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
             else None
         ),
         "artifacts": collect_artifacts(observations),
+        "sources": collect_sources(observations),
         "extractions": collect_extractions(observations),
+        "validations": collect_validations(observations),
         "open_questions": open_questions,
         "cost_usd": run.cost_usd,
         "steps_used": run.steps_used,

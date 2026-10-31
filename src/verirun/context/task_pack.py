@@ -18,6 +18,7 @@ from verirun.validation import format_validation_errors
 ID_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
 SCAN_TOOL = "files.extract"
+INVOICE_EXTRACT_TOOL = "invoice.extract"
 
 
 class TaskPackError(ValueError):
@@ -95,11 +96,13 @@ class TaskPack(BaseModel):
         return checks
 
     @model_validator(mode="after")
-    def _scan_tool_needs_a_threshold(self) -> TaskPack:
-        if SCAN_TOOL in self.tools and self.extraction is None:
-            raise ValueError(
-                f"tool '{SCAN_TOOL}' is allowlisted but no extraction.confidence_threshold is set"
-            )
+    def _extraction_tool_needs_a_threshold(self) -> TaskPack:
+        for tool in (SCAN_TOOL, INVOICE_EXTRACT_TOOL):
+            if tool in self.tools and self.extraction is None:
+                raise ValueError(
+                    f"tool '{tool}' is allowlisted but no "
+                    "extraction.confidence_threshold is set"
+                )
         return self
 
     def policy_ids(self) -> list[str]:

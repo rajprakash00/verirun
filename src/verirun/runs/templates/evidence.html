@@ -117,6 +117,50 @@
   </div>
   {% endif %}
 
+  {% if evidence.sources %}
+  <div class="card">
+    <h2>Source messages</h2>
+    {% for source in evidence.sources %}
+    <h3>{{ source.subject }} <span class="muted">{{ source.message_id }}</span></h3>
+    <p class="muted">{{ source.sender }}{% if source.sender_email %} &lt;{{ source.sender_email }}&gt;{% endif %} · {{ source.received_at }}</p>
+    {% if source.attachments %}
+    <table>
+      <thead><tr><th>Attachment</th><th>Content address</th><th>Bytes</th><th>Path</th></tr></thead>
+      <tbody>
+        {% for attachment in source.attachments %}
+        <tr>
+          <td>{{ attachment.filename }}</td>
+          <td><code>{{ attachment.id }}</code></td>
+          <td>{{ attachment.size_bytes }}</td>
+          <td><code>{{ attachment.path }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">No attachments.</p>{% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if evidence.validations %}
+  <div class="card">
+    <h2>GST validations</h2>
+    <table>
+      <thead><tr><th>Check</th><th>Result</th><th>Detail</th><th>Source</th></tr></thead>
+      <tbody>
+        {% for validation in evidence.validations %}
+        <tr>
+          <td><code>{{ validation.id }}</code></td>
+          <td><span class="badge {{ 'ok' if validation.ok else 'bad' }}">{{ 'pass' if validation.ok else 'FAIL' }}</span></td>
+          <td>{{ validation.detail }}</td>
+          <td class="muted">{{ validation.source or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <div class="card">
     <h2>Timeline</h2>
     {% if timeline %}
@@ -199,10 +243,10 @@
     </h3>
     {% if extraction.fields %}
     <table>
-      <thead><tr><th>Field</th><th>Value</th><th>Confidence</th></tr></thead>
+      <thead><tr><th>Field</th><th>Value</th><th>Confidence</th><th>Citation</th></tr></thead>
       <tbody>
         {% for name, field in extraction.fields.items() %}
-        <tr><td><code>{{ name }}</code></td><td>{{ field.value }}</td><td>{{ field.confidence }}</td></tr>
+        <tr><td><code>{{ name }}</code></td><td>{{ field.value }}</td><td>{{ field.confidence }}</td><td class="muted">{{ field.citation or "—" }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

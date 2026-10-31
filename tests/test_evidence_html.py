@@ -108,6 +108,57 @@ def test_render_shows_approvals_extractions_and_open_questions(tmp_path: Path) -
     assert "Should the duplicate AQ-2026-014 be ignored?" in html
 
 
+def test_render_shows_citations_and_gst_validations(tmp_path: Path) -> None:
+    store = seeded_store(tmp_path)
+    evidence = build_evidence(store.get_run("RUN-0001"), store)
+    evidence["extractions"] = [
+        {
+            "path": "attachments/ab/cd/invoice.pdf",
+            "method": "text",
+            "schema": "india-gst",
+            "pages": 1,
+            "threshold": 0.8,
+            "min_confidence": 0.97,
+            "fields": {
+                "supplier_gstin": {
+                    "value": "29AABCV1234C1ZQ",
+                    "confidence": 0.99,
+                    "citation": "GSTIN: 29AABCV1234C1ZQ",
+                }
+            },
+            "validations": [
+                {"id": "gstin_checksum", "ok": True, "detail": "check digit is valid"}
+            ],
+            "ok": True,
+            "summary": "Extracted 1 field with citations",
+        }
+    ]
+    evidence["validations"] = [
+        {
+            "id": "gstin_checksum",
+            "ok": True,
+            "detail": "GSTIN 29AABCV1234C1ZQ is well formed",
+            "source": "attachments/ab/cd/invoice.pdf",
+            "tool": "invoice.extract",
+        },
+        {
+            "id": "tax_sum",
+            "ok": False,
+            "detail": "11,800.00 INR != 11,850.00 INR",
+            "source": "attachments/ab/cd/invoice.pdf",
+            "tool": "invoice.extract",
+        },
+    ]
+
+    html = render_evidence_html(evidence)
+
+    assert "Citation" in html
+    assert "GSTIN: 29AABCV1234C1ZQ" in html
+    assert "gstin_checksum" in html
+    assert "GSTIN 29AABCV1234C1ZQ is well formed" in html
+    assert "11,800.00 INR != 11,850.00 INR" in html
+
+
 def test_render_escapes_run_data(tmp_path: Path) -> None:
     store = seeded_store(tmp_path)
     evidence = build_evidence(store.get_run("RUN-0001"), store)

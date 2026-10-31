@@ -18,7 +18,7 @@ from verirun.engine.states import RunState
 from verirun.llm.client import LLMClient, build_client
 from verirun.runs.models import Escalation, Run
 from verirun.runs.store import RunStore, generate_run_id
-from verirun.runtime import Backends, live_registry
+from verirun.runtime import Backends, live_registry, sync_mail
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -158,7 +158,8 @@ def _run_command(
         run_id = generate_run_id()
         llm = client or build_client(settings, session_id=run_id)
         store = RunStore(settings.run_db)
-        backends = Backends.mock_suite(settings)
+        backends = Backends.from_settings(settings)
+        sync_mail(backends)
         with live_registry(
             settings, context, task_pack, llm, run_id, backends=backends
         ) as registry:

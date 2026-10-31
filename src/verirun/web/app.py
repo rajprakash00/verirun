@@ -83,7 +83,9 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
         context = load_company_context(settings.company_dir)
         task_pack = load_task_pack(settings.tasks_dir / f"{run.task_id}.yaml")
         client = make_client(run_id)
-        backends = Backends.mock_suite(settings)
+        # Only the CLI starts new Runs; a resume reads the already-ingested
+        # source, so a mailbox error cannot block an approval decision.
+        backends = Backends.from_settings(settings)
         with live_registry(
             settings, context, task_pack, client, run_id, backends=backends
         ) as registry:

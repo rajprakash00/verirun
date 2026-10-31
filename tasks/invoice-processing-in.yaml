@@ -1,0 +1,29 @@
+id: invoice-processing-in
+title: India GST invoice processing
+goal_template: >-
+  Turn supplier invoice emails from the AP mailbox into a reviewable India GST
+  extraction with per-field citations and GST validations, then archive the
+  source document. Request: {request}
+sop: india-gst-extraction
+policies: []
+tools:
+  - mail.list
+  - mail.read
+  - mail.mark_read
+  - files.list
+  - files.read
+  - invoice.extract
+  - files.archive
+  - erp.list_vendors
+  - erp.list_purchase_orders
+  - erp.get_purchase_order
+  - erp.list_invoices
+  - erp.get_invoice
+extraction:
+  confidence_threshold: 0.8
+verification:
+  - id: source-archived
+    description: The source invoice document is in the processed archive.
+    check: file_archived
+    params:
+      directory: processed

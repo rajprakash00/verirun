@@ -131,6 +131,100 @@ def test_evidence_carries_extracted_fields_and_confidences(tmp_path: Path) -> No
     assert low["fields"]["amount_cents"]["confidence"] == 0.42
 
 
+def test_evidence_carries_india_extraction_sources_and_validations(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs" / "verirun.db")
+    seed_completed_run(store)
+    store.add_observation(
+        "RUN-0001",
+        Observation(
+            ok=True,
+            summary="Read message 'MSG-abc123def456' from Paper Trail Accounts",
+            data={
+                "id": "MSG-abc123def456",
+                "folder": "inbox",
+                "sender": "Paper Trail Accounts",
+                "sender_email": "accounts@papertrail.example",
+                "subject": "Tax invoice PTS/2026/0142",
+                "body": "Please process",
+                "received_at": "2026-09-05T09:00:00+00:00",
+                "attachments": [
+                    {
+                        "id": "a" * 64,
+                        "filename": "PTS-2026-0142.pdf",
+                        "content_type": "application/pdf",
+                        "size_bytes": 2481,
+                        "path": f"attachments/aa/aa/{'a' * 64}/PTS-2026-0142.pdf",
+                    }
+                ],
+            },
+        ),
+        step_position=0,
+        tool="mail.read",
+    )
+    store.add_observation(
+        "RUN-0001",
+        Observation(
+            ok=True,
+            summary="Extracted 13 field(s) with citations",
+            data={
+                "path": "attachments/aa/aa/x/PTS-2026-0142.pdf",
+                "method": "text",
+                "schema": "india-gst",
+                "pages": 1,
+                "threshold": 0.8,
+                "min_confidence": 0.95,
+                "fields": {
+                    "supplier_gstin": {
+                        "value": "29AABCV1234C1ZQ",
+                        "confidence": 0.99,
+                        "citation": "GSTIN: 29AABCV1234C1ZQ",
+                    },
+                    "total_paise": {
+                        "value": 1_180_000,
+                        "confidence": 0.98,
+                        "citation": "Total: 11,800.00 INR",
+                    },
+                },
+                "validations": [
+                    {
+                        "id": "gstin_checksum",
+                        "ok": True,
+                        "detail": "GSTIN 29AABCV1234C1ZQ is well formed",
+                    },
+                    {
+                        "id": "tax_sum",
+                        "ok": False,
+                        "detail": "11,800.00 INR != 11,850.00 INR",
+                    },
+                ],
+            },
+        ),
+        step_position=0,
+        tool="invoice.extract",
+    )
+
+    evidence = build_evidence(store.get_run("RUN-0001"), store)
+
+    extraction = next(
+        item for item in evidence["extractions"] if item["schema"] == "india-gst"
+    )
+    assert extraction["fields"]["supplier_gstin"]["citation"] == "GSTIN: 29AABCV1234C1ZQ"
+    assert extraction["fields"]["total_paise"]["value"] == 1_180_000
+    assert extraction["validations"][0]["id"] == "gstin_checksum"
+
+    assert [item["id"] for item in evidence["validations"]] == [
+        "gstin_checksum",
+        "tax_sum",
+    ]
+    assert evidence["validations"][1]["ok"] is False
+    assert evidence["validations"][1]["source"] == "attachments/aa/aa/x/PTS-2026-0142.pdf"
+
+    source = evidence["sources"][0]
+    assert source["message_id"] == "MSG-abc123def456"
+    assert source["subject"] == "Tax invoice PTS/2026/0142"
+    assert source["attachments"][0]["id"] == "a" * 64
+
+
 def test_evidence_carries_approval_requests_and_decisions(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "runs" / "verirun.db")
     store.create_run("Process the invoices", "invoice-processing", run_id="RUN-0004")
