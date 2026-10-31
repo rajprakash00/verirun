@@ -28,7 +28,7 @@ from verirun.runs.store import (
     RunNotFoundError,
     RunStore,
 )
-from verirun.runtime import live_registry
+from verirun.runtime import Backends, live_registry
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -83,15 +83,18 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
         context = load_company_context(settings.company_dir)
         task_pack = load_task_pack(settings.tasks_dir / f"{run.task_id}.yaml")
         client = make_client(run_id)
-        with live_registry(settings, context, task_pack, client, run_id) as registry:
+        backends = Backends.mock_suite(settings)
+        with live_registry(
+            settings, context, task_pack, client, run_id, backends=backends
+        ) as registry:
             resume_run(
                 run_id,
                 task_pack,
                 client,
                 store,
                 registry,
-                erp_db_path=settings.erp_db,
-                shared_root=settings.shared_dir,
+                accounting=backends.verifier_accounting,
+                shared_root=backends.mail.document_root,
                 evidence_root=settings.run_db.parent,
                 max_steps=settings.max_steps,
                 max_cost_usd=settings.max_cost_usd,

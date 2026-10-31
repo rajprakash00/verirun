@@ -21,22 +21,36 @@ an Evidence Pack.
                         │  limit_reached)               │
                         └───┬──────────────────┬────────┘
                             │                  │
-             ┌──────────────▼─────┐   ┌────────▼──────────┐
-             │    Tool Layer      │   │     Verifier      │
-             │ browser / files /  │   │ reads ground      │
-             │ mail / erp         │   │ truth, not the UI │
-             └──────────┬─────────┘   └────────┬──────────┘
-                        │                      │
-             ┌──────────▼──────────────────────▼──────────┐
-             │                 Mock Suite                  │
-             │  MailDesk (webmail)   LedgerLite (ERP)      │
-             │  shared/ file tree    SQLite state          │
-             └─────────────────────────────────────────────┘
+              ┌──────────────▼─────┐   ┌────────▼──────────┐
+              │     Tool Layer     │   │      Verifier     │
+              │ browser / files /  │   │  reads the system │
+              │     mail / erp     │   │ of record directly│
+              └──────────┬─────────┘   └────────┬──────────┘
+                         │                      │
+              ┌──────────▼──────────────────────▼──────────┐
+              │           Adapters (interfaces)            │
+              │     MailSource        AccountingSystem     │
+              │      AccountingReads (Verifier only)       │
+              └──────────┬──────────────────────┬──────────┘
+                         │                      │
+              ┌──────────▼──────────────────────▼──────────┐
+              │                 Mock Suite                 │
+              │   MailDesk (webmail)   LedgerLite (ERP)    │
+              │     shared/ file tree    SQLite state      │
+              └────────────────────────────────────────────┘
 
  Company Context (SOPs, policies, registry) ──► Orchestrator
  Task Packs (YAML)                          ──► Orchestrator
  LLM client (live | record | replay)        ──► Orchestrator + Verifier
 ```
+
+The engine and the Verifier depend on adapters, never on a mock database.
+`MailSource` covers listing, reading, and opening messages and attachments.
+`AccountingReads` covers vendor, purchase-order, goods-receipt, bill, payment,
+and pending-approval reads; the Verifier gets only this interface.
+`AccountingSystem` adds purchase-bill creation plus the Mock Suite's vendor
+creation and payment scheduling. The Mock Suite adapters and an in-memory fake
+implement them; IMAP and Zoho Books will be swaps (ADR 0007).
 
 ## 2. Engine
 
@@ -131,11 +145,13 @@ task-specific logic; swapping the Task Pack swaps the task. Demonstrated with
 ## 5. Mock Suite
 
 - **MailDesk**: webmail UI with seeded invoice and vendor emails plus attachments.
+  `MockMailSource` exposes it through the `MailSource` adapter.
 - **LedgerLite**: ERP UI with vendors, purchase orders, goods receipts, invoices, payments,
-  and approvals; exposes an HTTP API for its UI and the tests, and the Verifier reads its
-  SQLite database directly.
+  and approvals; exposes an HTTP API for its UI and the tests. `MockAccountingSystem`
+  exposes it through the `AccountingSystem` adapter, and the Verifier reads it through
+  `AccountingReads`.
 - **shared/**: documents (PDFs, scans, tax forms) and archive folders.
-- **SQLite**: system state; seed scripts create all scenarios.
+- **SQLite**: system state; seed scripts create all scenarios. Only the adapters open it.
 
 ## 6. Human-in-the-loop
 
@@ -147,9 +163,9 @@ repeated failure escalates with a question.
 ## 7. Verification
 
 The Verifier reads the Task Pack's verification contract and checks real state through the
-LedgerLite database and the filesystem. It does not read the executor's messages and
-does not trust screenshots. Output: pass/fail per criterion with evidence references.
-Screenshots are display evidence only.
+read-only accounting adapter (`AccountingReads`) and the filesystem. It does not read the
+executor's messages and does not trust screenshots. Output: pass/fail per criterion with
+evidence references. Screenshots are display evidence only.
 
 The eval harness has two eval-only switches that the product paths leave at their defaults.
 Disabling the Verifier accepts the executor's outcome without a verification pass and writes
@@ -213,6 +229,7 @@ verirun/
 │   └── vendor-onboarding.yaml
 ├── src/verirun/
 │   ├── demo.py                # one-command demo
+│   ├── adapters/              # MailSource + AccountingSystem seams and fakes
 │   ├── engine/                # state machine, planner, executor, verifier
 │   ├── context/               # Company Context loader, Work Order
 │   ├── llm/                   # provider client, replay, cost meter

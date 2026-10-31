@@ -19,7 +19,7 @@ from verirun.context.task_pack import load_task_pack
 from verirun.engine.approve import approve, reject
 from verirun.engine.orchestrator import resume_run
 from verirun.engine.states import RunState
-from verirun.runtime import build_registry
+from verirun.runtime import Backends, build_registry
 
 
 def test_an_over_limit_payment_parks_before_submission(
@@ -65,15 +65,16 @@ def test_a_pending_approval_is_never_auto_submitted(
     )
     context = load_company_context(settings.company_dir)
     task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
+    backends = Backends.mock_suite(settings)
 
     run = resume_run(
         run_id,
         task_pack,
         script,
         store,
-        build_registry(settings, context, task_pack, script),
-        erp_db_path=ledgerlite_db,
-        shared_root=maildesk_state.shared_root,
+        build_registry(settings, context, task_pack, script, backends=backends),
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
     )
 
@@ -100,6 +101,7 @@ def test_approving_resumes_the_run_and_completes_verified(
     assert request is not None
     context = load_company_context(settings.company_dir)
     task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
+    backends = Backends.mock_suite(settings)
 
     approve(store, request.id)
     run = resume_run(
@@ -107,9 +109,9 @@ def test_approving_resumes_the_run_and_completes_verified(
         task_pack,
         script,
         store,
-        build_registry(settings, context, task_pack, script),
-        erp_db_path=ledgerlite_db,
-        shared_root=maildesk_state.shared_root,
+        build_registry(settings, context, task_pack, script, backends=backends),
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
     )
 

@@ -43,7 +43,7 @@ from verirun.engine.models import Plan
 from verirun.engine.states import RunState
 from verirun.llm.client import AssistantTurn, Message, ToolSpec
 from verirun.runs.store import RunStore
-from verirun.runtime import build_registry
+from verirun.runtime import Backends, build_registry
 from verirun.tools import BrowserSession, ToolRegistry, build_browser_tools
 
 BROWSER_TOOLS = [
@@ -361,7 +361,14 @@ def test_a_regrounded_locator_is_journaled_and_a_retry_replays_it(
     session = BrowserSession(artifact_dir=tmp_path / "artifacts")
     session.start()
     try:
-        registry = build_registry(settings, context, task_pack, client, browser=session)
+        registry = build_registry(
+            settings,
+            context,
+            task_pack,
+            client,
+            backends=Backends.mock_suite(settings),
+            browser=session,
+        )
         run_id = planned_run(store)
         run = execute_run(run_id, client, store, registry, task_pack=None)
     finally:

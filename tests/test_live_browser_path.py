@@ -29,7 +29,7 @@ from verirun.context.task_pack import load_task_pack
 from verirun.engine.orchestrator import run_task
 from verirun.engine.states import RunState
 from verirun.runs.store import RunStore
-from verirun.runtime import build_registry, live_registry
+from verirun.runtime import Backends, build_registry, live_registry
 from verirun.tools import BrowserSession
 from verirun.web import create_app
 
@@ -204,7 +204,14 @@ def test_the_live_registry_registers_the_browser_tools(tmp_path: Path) -> None:
     context = load_company_context(settings.company_dir)
     task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
 
-    with live_registry(settings, context, task_pack, ScriptedClient([]), "RUN-0001") as registry:
+    with live_registry(
+        settings,
+        context,
+        task_pack,
+        ScriptedClient([]),
+        "RUN-0001",
+        backends=Backends.mock_suite(settings),
+    ) as registry:
         available = {tool.name for tool in registry.available()}
         specs = {spec["function"]["name"] for spec in registry.specs()}
 
@@ -260,15 +267,16 @@ def test_approving_over_http_resumes_with_a_browser_step(
     task_pack = load_task_pack(settings.tasks_dir / "invoice-processing.yaml")
     store = RunStore(settings.run_db)
     script = resume_script(ledgerlite_server)
+    backends = Backends.mock_suite(settings)
     run = run_task(
         "Process the invoices in the AP mailbox",
         task_pack,
         context,
         script,
         store,
-        build_registry(settings, context, task_pack, script),
-        erp_db_path=ledgerlite_db,
-        shared_root=maildesk_state.shared_root,
+        build_registry(settings, context, task_pack, script, backends=backends),
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
     )
     request = store.open_approval(run.id)

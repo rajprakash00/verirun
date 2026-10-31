@@ -42,7 +42,7 @@ from verirun.engine.states import RunState
 from verirun.llm.client import AssistantTurn, ToolCall, Usage
 from verirun.runs.models import Run
 from verirun.runs.store import RunStore, generate_run_id
-from verirun.runtime import build_registry
+from verirun.runtime import Backends, build_registry
 from verirun.tools import BrowserSession, ToolRegistry
 
 CHECKOUT_ROOT = Path(__file__).resolve().parents[2]
@@ -377,8 +377,9 @@ def run_happy(
     run_id: str,
 ) -> Run:
     script = happy_script(browser is not None, ledgerlite_url)
+    backends = Backends.mock_suite(settings)
     registry: ToolRegistry = build_registry(
-        settings, context, task_pack, script, browser=browser
+        settings, context, task_pack, script, backends=backends, browser=browser
     )
     return run_task(
         REQUEST,
@@ -387,8 +388,8 @@ def run_happy(
         script,
         store,
         registry,
-        erp_db_path=settings.erp_db,
-        shared_root=settings.shared_dir,
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
         run_id=run_id,
     )
@@ -398,15 +399,16 @@ def run_transient_failure(
     settings: Settings, context: CompanyContext, task_pack: TaskPack, store: RunStore
 ) -> Run:
     script = transient_script()
+    backends = Backends.mock_suite(settings)
     return run_task(
         REQUEST,
         task_pack,
         context,
         script,
         store,
-        build_registry(settings, context, task_pack, script),
-        erp_db_path=settings.erp_db,
-        shared_root=settings.shared_dir,
+        build_registry(settings, context, task_pack, script, backends=backends),
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
         run_id=generate_run_id(),
     )
@@ -416,7 +418,8 @@ def run_approval(
     settings: Settings, context: CompanyContext, task_pack: TaskPack, store: RunStore
 ) -> tuple[Run, Run]:
     script = over_limit_script()
-    registry = build_registry(settings, context, task_pack, script)
+    backends = Backends.mock_suite(settings)
+    registry = build_registry(settings, context, task_pack, script, backends=backends)
     run = run_task(
         REQUEST,
         task_pack,
@@ -424,8 +427,8 @@ def run_approval(
         script,
         store,
         registry,
-        erp_db_path=settings.erp_db,
-        shared_root=settings.shared_dir,
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
         run_id=generate_run_id(),
     )
@@ -440,9 +443,9 @@ def run_approval(
         task_pack,
         script,
         store,
-        build_registry(settings, context, task_pack, script),
-        erp_db_path=settings.erp_db,
-        shared_root=settings.shared_dir,
+        build_registry(settings, context, task_pack, script, backends=backends),
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
     )
     return run, resumed

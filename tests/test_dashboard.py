@@ -27,7 +27,7 @@ from verirun.context.task_pack import load_task_pack
 from verirun.engine.orchestrator import run_task
 from verirun.engine.states import RunState
 from verirun.runs.store import RunStore
-from verirun.runtime import build_registry
+from verirun.runtime import Backends, build_registry
 from verirun.web import create_app
 
 ESCALATED_PLAN = {
@@ -61,15 +61,16 @@ def escalate_run(tmp_path: Path, ledgerlite_db: Path, maildesk_state) -> tuple[o
             ),
         ]
     )
+    backends = Backends.mock_suite(settings)
     run = run_task(
         "Process the invoices in the AP mailbox",
         task_pack,
         context,
         script,
         store,
-        build_registry(settings, context, task_pack, script),
-        erp_db_path=ledgerlite_db,
-        shared_root=maildesk_state.shared_root,
+        build_registry(settings, context, task_pack, script, backends=backends),
+        accounting=backends.verifier_accounting,
+        shared_root=backends.mail.document_root,
         evidence_root=settings.run_db.parent,
     )
     return settings, store, run.id

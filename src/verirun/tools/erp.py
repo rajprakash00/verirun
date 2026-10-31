@@ -1,36 +1,22 @@
-"""ERP tools: read and write LedgerLite, the internal system of record.
+"""ERP tools: read and write the accounting system through its adapter.
 
-Reads answer from the same SQLite database the LedgerLite app serves. The write
-tools mirror the UI's behaviour: ``erp.file_invoice`` consumes a seeded
-transient-failure flag before inserting, and ``erp.schedule_payment`` reports
-the vendor status and amount the policy gate needs before it runs.
+The engine depends on ``AccountingSystem``; the Mock Suite's LedgerLite adapter
+implements it for the demo, eval, and tests, and the in-memory fake implements
+it for deterministic engine tests.
 """
 
 from __future__ import annotations
 
-import sqlite3
-from contextlib import closing
-from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any, ClassVar
 
+from verirun.adapters import AccountingSystem, AdapterError
 from verirun.engine.models import Observation
 from verirun.tools.base import Tool, ToolError, optional_str, require_str
 
-READ_ACTIONS = (
-    "erp.list_vendors",
-    "erp.get_vendor",
-    "erp.list_purchase_orders",
-    "erp.get_purchase_order",
-    "erp.get_goods_receipt",
-    "erp.list_invoices",
-    "erp.get_invoice",
-)
-
 
 def parse_amount(raw: Any) -> int:
-    """Parse a dollar amount into whole cents, rejecting anything ambiguous."""
+    """Parse a money amount into whole cents, rejecting anything ambiguous."""
     if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
         raise ToolError("invalid", f"amount must be a number, got {raw!r}")
     text = str(raw).strip().lstrip("$").replace(",", "")
@@ -44,65 +30,11 @@ def parse_amount(raw: Any) -> int:
     return int(cents)
 
 
-def _money(cents: int, currency: str) -> str:
-    return f"{cents / 100:,.2f} {currency}"
-
-
-def _next_id(conn: sqlite3.Connection, table: str, prefix: str) -> str:
-    row = conn.execute(
-        f"SELECT id FROM {table} WHERE id LIKE ?"
-        " ORDER BY CAST(SUBSTR(id, ?) AS INTEGER) DESC LIMIT 1",
-        (f"{prefix}-%", len(prefix) + 2),
-    ).fetchone()
-    number = int(row["id"].split("-")[1]) + 1 if row else 1001
-    return f"{prefix}-{number}"
-
-
-def _consume_failure(conn: sqlite3.Connection, key: str) -> str | None:
-    row = conn.execute(
-        "SELECT remaining, message FROM failure_flags WHERE key = ?", (key,)
-    ).fetchone()
-    if row is None or row["remaining"] <= 0:
-        return None
-    conn.execute("UPDATE failure_flags SET remaining = remaining - 1 WHERE key = ?", (key,))
-    conn.commit()
-    return row["message"] or "LedgerLite is temporarily unavailable; retry the request."
-
-
 class ErpTool(Tool):
-    """An ERP tool bound to one LedgerLite database."""
+    """An ERP tool bound to one accounting system."""
 
-    def __init__(self, db_path: str | Path) -> None:
-        self.db_path = Path(db_path)
-
-    def connect(self) -> sqlite3.Connection:
-        if not self.db_path.is_file():
-            raise ToolError("not_found", f"LedgerLite database not found: {self.db_path}")
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
-
-    def one(self, conn: sqlite3.Connection, table: str, row_id: str, kind: str) -> dict[str, Any]:
-        row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,)).fetchone()
-        if row is None:
-            raise ToolError("not_found", f"no {kind} '{row_id}' in LedgerLite")
-        return dict(row)
-
-    def many(
-        self, conn: sqlite3.Connection, table: str, filters: dict[str, Any]
-    ) -> list[dict[str, Any]]:
-        clauses = []
-        params: list[Any] = []
-        for column, value in filters.items():
-            if value is not None:
-                clauses.append(f"{column} = ?")
-                params.append(value)
-        sql = f"SELECT * FROM {table}"
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY id"
-        return [dict(row) for row in conn.execute(sql, params)]
+    def __init__(self, accounting: AccountingSystem) -> None:
+        self.accounting = accounting
 
 
 class ListVendorsTool(ErpTool):
@@ -117,12 +49,11 @@ class ListVendorsTool(ErpTool):
     }
 
     def run(self, args: dict[str, Any]) -> Observation:
-        with closing(self.connect()) as conn:
-            vendors = self.many(conn, "vendors", {"status": optional_str(args, "status")})
+        vendors = self.adapter_call(self.accounting.list_vendors, status=optional_str(args, "status"))
         return Observation(
             ok=True,
             summary=f"Listed {len(vendors)} vendor(s)",
-            data={"vendors": vendors},
+            data={"vendors": [vendor.as_dict() for vendor in vendors]},
         )
 
 
@@ -138,9 +69,12 @@ class GetVendorTool(ErpTool):
 
     def run(self, args: dict[str, Any]) -> Observation:
         vendor_id = require_str(args, "vendor_id")
-        with closing(self.connect()) as conn:
-            vendor = self.one(conn, "vendors", vendor_id, "vendor")
-        return Observation(ok=True, summary=f"Fetched vendor {vendor_id}", data={"vendor": vendor})
+        vendor = self.adapter_call(self.accounting.get_vendor, vendor_id)
+        return Observation(
+            ok=True,
+            summary=f"Fetched vendor {vendor_id}",
+            data={"vendor": vendor.as_dict()},
+        )
 
 
 class ListPurchaseOrdersTool(ErpTool):
@@ -156,16 +90,15 @@ class ListPurchaseOrdersTool(ErpTool):
     }
 
     def run(self, args: dict[str, Any]) -> Observation:
-        with closing(self.connect()) as conn:
-            orders = self.many(
-                conn,
-                "purchase_orders",
-                {"vendor_id": optional_str(args, "vendor_id"), "status": optional_str(args, "status")},
-            )
+        orders = self.adapter_call(
+            self.accounting.list_purchase_orders,
+            vendor_id=optional_str(args, "vendor_id"),
+            status=optional_str(args, "status"),
+        )
         return Observation(
             ok=True,
             summary=f"Listed {len(orders)} purchase order(s)",
-            data={"purchase_orders": orders},
+            data={"purchase_orders": [order.as_dict() for order in orders]},
         )
 
 
@@ -181,10 +114,11 @@ class GetPurchaseOrderTool(ErpTool):
 
     def run(self, args: dict[str, Any]) -> Observation:
         po_id = require_str(args, "po_id")
-        with closing(self.connect()) as conn:
-            order = self.one(conn, "purchase_orders", po_id, "purchase order")
+        order = self.adapter_call(self.accounting.get_purchase_order, po_id)
         return Observation(
-            ok=True, summary=f"Fetched purchase order {po_id}", data={"purchase_order": order}
+            ok=True,
+            summary=f"Fetched purchase order {po_id}",
+            data={"purchase_order": order.as_dict()},
         )
 
 
@@ -200,10 +134,11 @@ class GetGoodsReceiptTool(ErpTool):
 
     def run(self, args: dict[str, Any]) -> Observation:
         gr_id = require_str(args, "gr_id")
-        with closing(self.connect()) as conn:
-            receipt = self.one(conn, "goods_receipts", gr_id, "goods receipt")
+        receipt = self.adapter_call(self.accounting.get_goods_receipt, gr_id)
         return Observation(
-            ok=True, summary=f"Fetched goods receipt {gr_id}", data={"goods_receipt": receipt}
+            ok=True,
+            summary=f"Fetched goods receipt {gr_id}",
+            data={"goods_receipt": receipt.as_dict()},
         )
 
 
@@ -221,20 +156,16 @@ class ListInvoicesTool(ErpTool):
     }
 
     def run(self, args: dict[str, Any]) -> Observation:
-        with closing(self.connect()) as conn:
-            invoices = self.many(
-                conn,
-                "invoices",
-                {
-                    "number": optional_str(args, "number"),
-                    "vendor_id": optional_str(args, "vendor_id"),
-                    "status": optional_str(args, "status"),
-                },
-            )
+        bills = self.adapter_call(
+            self.accounting.list_bills,
+            number=optional_str(args, "number"),
+            vendor_id=optional_str(args, "vendor_id"),
+            status=optional_str(args, "status"),
+        )
         return Observation(
             ok=True,
-            summary=f"Listed {len(invoices)} invoice(s)",
-            data={"invoices": invoices},
+            summary=f"Listed {len(bills)} invoice(s)",
+            data={"invoices": [bill.as_dict() for bill in bills]},
         )
 
 
@@ -250,10 +181,11 @@ class GetInvoiceTool(ErpTool):
 
     def run(self, args: dict[str, Any]) -> Observation:
         invoice_id = require_str(args, "invoice_id")
-        with closing(self.connect()) as conn:
-            invoice = self.one(conn, "invoices", invoice_id, "invoice")
+        bill = self.adapter_call(self.accounting.get_bill, invoice_id)
         return Observation(
-            ok=True, summary=f"Fetched invoice {invoice_id}", data={"invoice": invoice}
+            ok=True,
+            summary=f"Fetched invoice {invoice_id}",
+            data={"invoice": bill.as_dict()},
         )
 
 
@@ -283,58 +215,28 @@ class CreateVendorTool(ErpTool):
         tax_id = require_str(args, "tax_id")
         email = require_str(args, "email")
         address = require_str(args, "address")
-        with closing(self.connect()) as conn:
-            existing = conn.execute(
-                "SELECT id, status, tax_id FROM vendors WHERE tax_id = ? OR name = ? ORDER BY id",
-                (tax_id, name),
-            ).fetchall()
-            if existing:
-                match = next(
-                    (row for row in existing if row["tax_id"] == tax_id), existing[0]
-                )
-                matched_on = "tax id" if match["tax_id"] == tax_id else "name"
-                raise ToolError(
-                    "invalid",
-                    f"A vendor with the same {matched_on} already exists: {match['id']}",
-                    data={
-                        "duplicate": True,
-                        "existing_vendor_id": match["id"],
-                        "existing_status": match["status"],
-                        "name": name,
-                        "tax_id": tax_id,
-                    },
-                )
-            vendor_id = _next_id(conn, "vendors", "V")
-            conn.execute(
-                """
-                INSERT INTO vendors (id, name, tax_id, email, address, status, created_at, scenario)
-                VALUES (?, ?, ?, ?, ?, 'active', ?, 'filed')
-                """,
-                (
-                    vendor_id,
-                    name,
-                    tax_id,
-                    email,
-                    address,
-                    datetime.now(UTC).isoformat(timespec="seconds"),
-                ),
-            )
-            conn.commit()
+        vendor = self.adapter_call(
+            self.accounting.create_vendor,
+            name=name,
+            tax_id=tax_id,
+            email=email,
+            address=address,
+        )
         return Observation(
             ok=True,
-            summary=f"Created vendor {vendor_id} ({name}) with tax id {tax_id}",
+            summary=f"Created vendor {vendor.id} ({vendor.name}) with tax id {vendor.tax_id}",
             data={
-                "vendor_id": vendor_id,
-                "name": name,
-                "tax_id": tax_id,
-                "email": email,
-                "address": address,
-                "status": "active",
+                "vendor_id": vendor.id,
+                "name": vendor.name,
+                "tax_id": vendor.tax_id,
+                "email": vendor.email,
+                "address": vendor.address,
+                "status": vendor.status,
             },
         )
 
     def policy_facts(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"system": "ledgerlite"}
+        return {"system": self.accounting.policy_system}
 
 
 class FileInvoiceTool(ErpTool):
@@ -369,99 +271,30 @@ class FileInvoiceTool(ErpTool):
         po_id = optional_str(args, "po_id")
         gr_id = optional_str(args, "gr_id")
         currency = optional_str(args, "currency", "USD") or "USD"
-        with closing(self.connect()) as conn:
-            self.one(conn, "vendors", vendor_id, "vendor")
-            existing = conn.execute(
-                "SELECT id, status FROM invoices WHERE vendor_id = ? AND number = ?",
-                (vendor_id, number),
-            ).fetchone()
-            if existing is not None:
-                raise ToolError(
-                    "invalid",
-                    f"Invoice {number} already exists for {vendor_id} as {existing['id']}",
-                    data={
-                        "duplicate": True,
-                        "number": number,
-                        "vendor_id": vendor_id,
-                        "existing_invoice_id": existing["id"],
-                        "existing_status": existing["status"],
-                    },
-                )
-            if po_id:
-                order = self.one(conn, "purchase_orders", po_id, "purchase order")
-                if order["amount_cents"] != amount_cents:
-                    raise ToolError(
-                        "invalid",
-                        (
-                            f"Invoice {number} is {_money(amount_cents, currency)} but "
-                            f"purchase order {po_id} is "
-                            f"{_money(order['amount_cents'], currency)}"
-                        ),
-                        data={
-                            "mismatch": "purchase_order",
-                            "number": number,
-                            "vendor_id": vendor_id,
-                            "po_id": po_id,
-                            "invoice_amount_cents": amount_cents,
-                            "expected_amount_cents": order["amount_cents"],
-                            "currency": currency,
-                        },
-                    )
-            if gr_id:
-                receipt = self.one(conn, "goods_receipts", gr_id, "goods receipt")
-                if receipt["amount_cents"] != amount_cents:
-                    raise ToolError(
-                        "invalid",
-                        (
-                            f"Invoice {number} is {_money(amount_cents, currency)} but "
-                            f"goods receipt {gr_id} is "
-                            f"{_money(receipt['amount_cents'], currency)}"
-                        ),
-                        data={
-                            "mismatch": "goods_receipt",
-                            "number": number,
-                            "vendor_id": vendor_id,
-                            "gr_id": gr_id,
-                            "invoice_amount_cents": amount_cents,
-                            "expected_amount_cents": receipt["amount_cents"],
-                            "currency": currency,
-                        },
-                    )
-            failure = _consume_failure(conn, f"invoice.create:{number}")
-            if failure is not None:
-                raise ToolError("transient", failure)
-            invoice_id = _next_id(conn, "invoices", "INV")
-            conn.execute(
-                """
-                INSERT INTO invoices
-                    (id, number, vendor_id, po_id, gr_id, amount_cents, currency, status,
-                     received_at, scenario)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'received', ?, 'filed')
-                """,
-                (
-                    invoice_id,
-                    number,
-                    vendor_id,
-                    po_id,
-                    gr_id,
-                    amount_cents,
-                    currency,
-                    datetime.now(UTC).isoformat(timespec="seconds"),
-                ),
-            )
-            conn.commit()
+        bill = self.adapter_call(
+            self.accounting.create_purchase_bill,
+            number=number,
+            vendor_id=vendor_id,
+            amount_cents=amount_cents,
+            currency=currency,
+            po_id=po_id,
+            gr_id=gr_id,
+        )
         return Observation(
             ok=True,
-            summary=f"Filed invoice {number} as {invoice_id} for {amount_cents / 100:,.2f} {currency}",
+            summary=(
+                f"Filed invoice {bill.number} as {bill.id} for "
+                f"{bill.amount_cents / 100:,.2f} {bill.currency}"
+            ),
             data={
-                "invoice_id": invoice_id,
-                "number": number,
-                "vendor_id": vendor_id,
-                "amount_cents": amount_cents,
-                "currency": currency,
-                "po_id": po_id,
-                "gr_id": gr_id,
-                "status": "received",
+                "invoice_id": bill.id,
+                "number": bill.number,
+                "vendor_id": bill.vendor_id,
+                "amount_cents": bill.amount_cents,
+                "currency": bill.currency,
+                "po_id": bill.po_id,
+                "gr_id": bill.gr_id,
+                "status": bill.status,
             },
         )
 
@@ -494,69 +327,54 @@ class SchedulePaymentTool(ErpTool):
 
     def run(self, args: dict[str, Any]) -> Observation:
         invoice_id = require_str(args, "invoice_id")
-        scheduled_for = optional_str(args, "scheduled_for")
-        with closing(self.connect()) as conn:
-            invoice = self.one(conn, "invoices", invoice_id, "invoice")
-            amount_cents = self._full_amount(invoice, args.get("amount"))
-            payment_id = _next_id(conn, "payments", "PAY")
-            due = scheduled_for or (datetime.now(UTC).date() + timedelta(days=30)).isoformat()
-            conn.execute(
-                """
-                INSERT INTO payments
-                    (id, invoice_id, amount_cents, currency, scheduled_for, status, scenario)
-                VALUES (?, ?, ?, ?, ?, 'scheduled', 'filed')
-                """,
-                (payment_id, invoice_id, amount_cents, invoice["currency"], due),
-            )
-            conn.commit()
+        raw_amount = args.get("amount")
+        amount_cents = parse_amount(raw_amount) if raw_amount is not None else None
+        payment = self.adapter_call(
+            self.accounting.schedule_payment,
+            bill_id=invoice_id,
+            amount_cents=amount_cents,
+            scheduled_for=optional_str(args, "scheduled_for"),
+        )
         return Observation(
             ok=True,
             summary=(
-                f"Scheduled payment {payment_id} of {amount_cents / 100:,.2f} "
-                f"{invoice['currency']} for {invoice_id} on {due}"
+                f"Scheduled payment {payment.id} of "
+                f"{payment.amount_cents / 100:,.2f} {payment.currency} "
+                f"for {invoice_id} on {payment.scheduled_for}"
             ),
             data={
-                "payment_id": payment_id,
-                "invoice_id": invoice_id,
-                "amount_cents": amount_cents,
-                "currency": invoice["currency"],
-                "scheduled_for": due,
-                "status": "scheduled",
+                "payment_id": payment.id,
+                "invoice_id": payment.bill_id,
+                "amount_cents": payment.amount_cents,
+                "currency": payment.currency,
+                "scheduled_for": payment.scheduled_for,
+                "status": payment.status,
             },
         )
-
-    def _full_amount(self, invoice: dict[str, Any], raw: Any) -> int:
-        if raw is None:
-            return int(invoice["amount_cents"])
-        amount_cents = parse_amount(raw)
-        if amount_cents != invoice["amount_cents"]:
-            raise ToolError(
-                "invalid",
-                f"payment must cover the full invoice {invoice['id']} "
-                f"({invoice['amount_cents'] / 100:,.2f} {invoice['currency']}); "
-                f"splitting is forbidden",
-            )
-        return amount_cents
 
     def policy_facts(self, args: dict[str, Any]) -> dict[str, Any]:
         invoice_id = args.get("invoice_id")
         if not isinstance(invoice_id, str) or not invoice_id:
-            return {"vendor_status": "unknown", "amount_usd": 0, "currency": "USD", "system": "ledgerlite"}
-        with closing(self.connect()) as conn:
-            invoice = conn.execute(
-                "SELECT * FROM invoices WHERE id = ?", (invoice_id,)
-            ).fetchone()
-            if invoice is None:
-                return {
-                    "vendor_status": "unknown",
-                    "amount_usd": 0,
-                    "currency": "USD",
-                    "system": "ledgerlite",
-                }
-            vendor = conn.execute(
-                "SELECT status FROM vendors WHERE id = ?", (invoice["vendor_id"],)
-            ).fetchone()
-        amount_cents = invoice["amount_cents"]
+            return {
+                "vendor_status": "unknown",
+                "amount_usd": 0,
+                "currency": "USD",
+                "system": self.accounting.policy_system,
+            }
+        try:
+            bill = self.accounting.get_bill(invoice_id)
+        except AdapterError:
+            return {
+                "vendor_status": "unknown",
+                "amount_usd": 0,
+                "currency": "USD",
+                "system": self.accounting.policy_system,
+            }
+        try:
+            vendor = self.accounting.get_vendor(bill.vendor_id)
+        except AdapterError:
+            vendor = None
+        amount_cents = bill.amount_cents
         raw_amount = args.get("amount")
         if raw_amount is not None:
             try:
@@ -564,24 +382,24 @@ class SchedulePaymentTool(ErpTool):
             except ToolError:
                 pass
         return {
-            "vendor_status": vendor["status"] if vendor else "unknown",
+            "vendor_status": vendor.status if vendor else "unknown",
             "amount_usd": amount_cents / 100,
-            "currency": invoice["currency"],
-            "system": "ledgerlite",
+            "currency": bill.currency,
+            "system": self.accounting.policy_system,
         }
 
 
-def build_erp_tools(db_path: str | Path) -> list[Tool]:
-    """The ERP tools, all bound to one LedgerLite database."""
+def build_erp_tools(accounting: AccountingSystem) -> list[Tool]:
+    """The ERP tools, all bound to one accounting system."""
     return [
-        ListVendorsTool(db_path),
-        GetVendorTool(db_path),
-        ListPurchaseOrdersTool(db_path),
-        GetPurchaseOrderTool(db_path),
-        GetGoodsReceiptTool(db_path),
-        ListInvoicesTool(db_path),
-        GetInvoiceTool(db_path),
-        CreateVendorTool(db_path),
-        FileInvoiceTool(db_path),
-        SchedulePaymentTool(db_path),
+        ListVendorsTool(accounting),
+        GetVendorTool(accounting),
+        ListPurchaseOrdersTool(accounting),
+        GetPurchaseOrderTool(accounting),
+        GetGoodsReceiptTool(accounting),
+        ListInvoicesTool(accounting),
+        GetInvoiceTool(accounting),
+        CreateVendorTool(accounting),
+        FileInvoiceTool(accounting),
+        SchedulePaymentTool(accounting),
     ]

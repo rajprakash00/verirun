@@ -45,3 +45,9 @@ Shared vocabulary for this project. A glossary only. No implementation details.
 **MailDesk** — the mock webmail system where requests and invoices arrive.
 
 **Mock Suite** — MailDesk + LedgerLite + the shared file tree + SQLite state.
+
+**Mail Source** — a system that supplies messages, their bodies, and their attachments. MailDesk is a Mail Source; IMAP and a watched folder will be.
+
+**Accounting System** — the system of record for vendors, purchase orders, and purchase bills. The Verifier reads it; the executor writes purchase bills to it. LedgerLite is an Accounting System; Zoho Books will be.
+
+**Purchase Bill** — the bill Verirun creates in the accounting system for a supplier invoice. LedgerLite calls it an invoice.

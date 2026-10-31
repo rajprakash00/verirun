@@ -12,6 +12,7 @@ from typing import Any
 
 from mocks.ledgerlite import db as ledgerlite
 from tests.support import ROOT, ScriptedClient, vision_fields
+from verirun.adapters import MockAccountingSystem
 from verirun.context.task_pack import TaskPack, load_task_pack
 from verirun.engine.states import RunState
 from verirun.engine.verify import verify_run
@@ -56,7 +57,7 @@ def file_invoice(
     **overrides: Any,
 ) -> str:
     arguments = {**INVOICE, **overrides}
-    tools = ToolRegistry(build_erp_tools(erp_db), allowlist=["erp.file_invoice"])
+    tools = ToolRegistry(build_erp_tools(MockAccountingSystem(erp_db)), allowlist=["erp.file_invoice"])
     observation = tools.invoke("erp.file_invoice", arguments)
     assert observation.ok, observation.summary
     store.record_action(run_id, key, "erp.file_invoice", arguments)
@@ -100,7 +101,7 @@ def file_invoice_directly(
 
 
 def schedule_payment(store: RunStore, erp_db: Path, invoice_id: str, *, run_id: str = "RUN-0001") -> None:
-    tools = ToolRegistry(build_erp_tools(erp_db), allowlist=["erp.schedule_payment"])
+    tools = ToolRegistry(build_erp_tools(MockAccountingSystem(erp_db)), allowlist=["erp.schedule_payment"])
     observation = tools.invoke(
         "erp.schedule_payment", {"invoice_id": invoice_id, "scheduled_for": "2026-10-05"}
     )
@@ -152,7 +153,7 @@ def test_a_verified_run_passes_every_criterion_with_evidence(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -181,7 +182,7 @@ def test_skipping_the_erp_write_fails_the_run(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -207,7 +208,7 @@ def test_a_wrong_amount_in_the_erp_is_caught_against_the_source_document(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -229,7 +230,7 @@ def test_an_invoice_filed_without_a_payment_fails_the_payment_criterion(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -251,7 +252,7 @@ def test_a_pending_approval_satisfies_the_payment_criterion_when_allowed(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -273,7 +274,7 @@ def test_a_filed_invoice_without_an_archived_source_fails(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -305,7 +306,7 @@ def test_a_payment_that_does_not_cover_the_invoice_fails(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -331,7 +332,7 @@ def test_a_rejected_invoice_does_not_verify(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -358,7 +359,7 @@ def test_a_stale_archive_file_does_not_satisfy_the_archive_criterion(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -383,7 +384,7 @@ def test_an_unknown_check_function_fails_with_a_clear_detail(
         "RUN-0001",
         pack,
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -422,7 +423,7 @@ def create_vendor(
     **overrides: Any,
 ) -> str:
     arguments = {**VENDOR, **overrides}
-    tools = ToolRegistry(build_erp_tools(erp_db), allowlist=["erp.create_vendor"])
+    tools = ToolRegistry(build_erp_tools(MockAccountingSystem(erp_db)), allowlist=["erp.create_vendor"])
     observation = tools.invoke("erp.create_vendor", arguments)
     assert observation.ok, observation.summary
     store.record_action(run_id, key, "erp.create_vendor", arguments)
@@ -457,7 +458,7 @@ def test_a_created_vendor_passes_with_evidence(
         "RUN-V001",
         vendor_task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -486,7 +487,7 @@ def test_identical_tax_form_copies_are_tolerated(
         "RUN-V001",
         vendor_task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -514,7 +515,7 @@ def test_a_vendor_created_twice_fails_the_uniqueness_check(
         "RUN-V001",
         vendor_task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -542,7 +543,7 @@ def test_a_vendor_field_that_disagrees_with_the_tax_form_fails(
         "RUN-V001",
         vendor_task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -562,7 +563,7 @@ def test_verifying_a_run_that_is_not_verifying_is_a_no_op(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -583,7 +584,7 @@ def test_a_scanned_invoice_verifies_against_the_verifiers_own_read(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
         client=ScriptedClient([vision_fields()]),
     )
@@ -607,7 +608,7 @@ def test_a_scanned_invoice_without_a_vision_client_fails(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
     )
 
@@ -630,7 +631,7 @@ def test_a_low_confidence_verifier_read_does_not_verify(
         "RUN-0001",
         task_pack(),
         store,
-        erp_db_path=ledgerlite_db,
+        accounting=MockAccountingSystem(ledgerlite_db),
         shared_root=maildesk_state.shared_root,
         client=ScriptedClient([vision_fields(amount=0.4)]),
     )
