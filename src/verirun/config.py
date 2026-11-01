@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     shared_dir: Path = Path("shared")
     mail_db: Path = Path("mocks/state/maildesk.db")
     erp_db: Path = Path("mocks/state/ledgerlite.db")
+    mail_state_db: Path = Path("runs/mail-index.db")
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_username: str = ""
+    imap_password: SecretStr = SecretStr("")
+    imap_folder: str = "INBOX"
+    imap_ssl: bool = True
+    watch_dir: Path | None = None
     max_steps: int = DEFAULT_MAX_STEPS
     max_cost_usd: float = DEFAULT_MAX_COST_USD
     request_timeout_s: float = 600.0

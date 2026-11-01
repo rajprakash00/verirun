@@ -128,6 +128,7 @@ def test_shipped_company_context_matches_the_task_pack() -> None:
 
     assert "invoice-processing" in context.sops
     assert "vendor-onboarding" in context.sops
+    assert "india-gst-extraction" in context.sops
     assert {"spend-limits", "action-rules"} <= set(context.policies.ids())
     assert {"maildesk", "ledgerlite", "files"} <= set(context.systems)
     assert context.precedents

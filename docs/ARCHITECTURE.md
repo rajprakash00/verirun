@@ -49,8 +49,15 @@ The engine and the Verifier depend on adapters, never on a mock database.
 `AccountingReads` covers vendor, purchase-order, goods-receipt, bill, payment,
 and pending-approval reads; the Verifier gets only this interface.
 `AccountingSystem` adds purchase-bill creation plus the Mock Suite's vendor
-creation and payment scheduling. The Mock Suite adapters and an in-memory fake
-implement them; IMAP and Zoho Books will be swaps (ADR 0007).
+creation and payment scheduling. The Mock Suite adapters, the in-memory fake,
+an IMAP source, and a watched-folder source implement them; Zoho Books will be
+the next accounting swap (ADR 0007, ADR 0008).
+
+India GST invoices go through `invoice.extract`: the model returns every field
+with a confidence and an exact citation, and deterministic GSTIN and tax
+validations run on the normalised paise values. A citation that is not in the
+document, or does not contain its value, fails the extraction; a failed GST
+validation is recorded in the Evidence Pack.
 
 ## 2. Engine
 
@@ -140,7 +147,8 @@ shown in the dashboard before execution.
 One declarative YAML file per kind of work: goal template, SOP reference, tool allowlist,
 policy references, approval rules, and a verification contract. The engine never contains
 task-specific logic; swapping the Task Pack swaps the task. Demonstrated with
-`invoice-processing` and `vendor-onboarding`.
+`invoice-processing`, `vendor-onboarding`, and the Phase 1 India extraction pack
+`invoice-processing-in`.
 
 ## 5. Mock Suite
 
@@ -152,6 +160,23 @@ task-specific logic; swapping the Task Pack swaps the task. Demonstrated with
   `AccountingReads`.
 - **shared/**: documents (PDFs, scans, tax forms) and archive folders.
 - **SQLite**: system state; seed scripts create all scenarios. Only the adapters open it.
+
+### Product mail sources
+
+- **IMAP**: host, port, username, and app password over SSL by default. The
+  adapter stores each folder's UIDVALIDITY and last ingested UID, fetches only
+  newer UIDs, and rescans safely when the server starts a new UIDVALIDITY epoch.
+- **Watched folder**: each PDF dropped into a directory becomes one message.
+- Both ingest into a local SQLite index and a content-addressed store
+  (`shared/attachments/<sha-prefix>/<sha>/<name>`). The message id is derived
+  from the source bytes, so a reconnect or a re-sync cannot store the same
+  message twice. The local index is authoritative; the engine never depends on
+  the server's `\Seen` flag.
+- **India GST extraction**: `invoice.extract` reads a text-layer PDF, asks the
+  reasoning model for the GST fields under a strict schema, checks every
+  citation against the document, normalises amounts to paise and dates to ISO,
+  and records GSTIN and tax validations. Scans still use the US vision schema
+  until the India Task Pack defines scan scenarios.
 
 ## 6. Human-in-the-loop
 
@@ -226,14 +251,16 @@ verirun/
 │   └── precedents/
 ├── tasks/                     # Task Packs (YAML)
 │   ├── invoice-processing.yaml
+│   ├── invoice-processing-in.yaml
 │   └── vendor-onboarding.yaml
 ├── src/verirun/
 │   ├── demo.py                # one-command demo
-│   ├── adapters/              # MailSource + AccountingSystem seams and fakes
+│   ├── adapters/              # MailSource + AccountingSystem seams, IMAP, folder, fakes
 │   ├── engine/                # state machine, planner, executor, verifier
 │   ├── context/               # Company Context loader, Work Order
+│   ├── india/                 # India GST schema, GSTIN and tax validations
 │   ├── llm/                   # provider client, replay, cost meter
-│   ├── tools/                 # browser, files, mail, erp
+│   ├── tools/                 # browser, files, mail, erp, invoice extraction
 │   ├── runs/                  # run store, journal, evidence pack
 │   └── web/                   # dashboard + API
 ├── mocks/                     # Mock Suite

@@ -84,6 +84,19 @@ def test_files_extract_requires_an_extraction_threshold(tmp_path: Path) -> None:
     assert "confidence_threshold" in str(excinfo.value)
 
 
+def test_invoice_extract_requires_an_extraction_threshold(tmp_path: Path) -> None:
+    text = VALID.replace(
+        "tools:\n  - files.read\n  - erp.file_invoice",
+        "tools:\n  - files.read\n  - invoice.extract\n  - erp.file_invoice",
+    )
+
+    with pytest.raises(TaskPackError) as excinfo:
+        load_task_pack(write_pack(tmp_path, text))
+
+    assert "invoice.extract" in str(excinfo.value)
+    assert "confidence_threshold" in str(excinfo.value)
+
+
 def test_minimal_pack_loads_with_empty_optionals(tmp_path: Path) -> None:
     pack = load_task_pack(
         write_pack(
@@ -238,6 +251,24 @@ def test_shipped_invoice_pack_is_valid() -> None:
     assert "files.extract" in pack.tools
     assert pack.extraction is not None
     assert 0.0 <= pack.extraction.confidence_threshold <= 1.0
+
+
+def test_shipped_india_pack_is_valid() -> None:
+    from verirun.context.company import load_company_context
+
+    root = Path(__file__).resolve().parents[1]
+    pack = load_task_pack(root / "tasks" / "invoice-processing-in.yaml")
+    context = load_company_context(root / "company")
+
+    assert pack.id == "invoice-processing-in"
+    assert pack.sop in context.sops
+    assert "invoice.extract" in pack.tools
+    assert "files.extract" not in pack.tools
+    assert pack.extraction is not None
+    assert pack.extraction.confidence_threshold == 0.8
+    assert [check.id for check in pack.verification] == ["source-archived"]
+    for policy in pack.policies:
+        assert policy in context.policies
 
 
 def test_shipped_vendor_onboarding_pack_is_valid() -> None:

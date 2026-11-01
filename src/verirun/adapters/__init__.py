@@ -19,6 +19,8 @@ from verirun.adapters.base import (
     UnsupportedError,
     Vendor,
 )
+from verirun.adapters.folder import WatchedFolderSource
+from verirun.adapters.imap import ImapSource
 from verirun.adapters.memory import InMemoryAccountingSystem
 from verirun.adapters.mock import MockAccountingSystem, MockMailSource
 
@@ -30,6 +32,7 @@ __all__ = [
     "Bill",
     "ConflictError",
     "GoodsReceipt",
+    "ImapSource",
     "InMemoryAccountingSystem",
     "MailAttachment",
     "MailMessage",
@@ -43,4 +46,5 @@ __all__ = [
     "TransientError",
     "UnsupportedError",
     "Vendor",
+    "WatchedFolderSource",
 ]

@@ -9,13 +9,15 @@ from dataclasses import dataclass
 from verirun.adapters import (
     AccountingReads,
     AccountingSystem,
+    ImapSource,
     MailSource,
     MockAccountingSystem,
     MockMailSource,
+    WatchedFolderSource,
 )
 from verirun.config import Settings
 from verirun.context.company import CompanyContext
-from verirun.context.task_pack import SCAN_TOOL, TaskPack
+from verirun.context.task_pack import INVOICE_EXTRACT_TOOL, SCAN_TOOL, TaskPack
 from verirun.llm.client import LLMClient
 from verirun.tools import (
     BrowserSession,
@@ -26,6 +28,7 @@ from verirun.tools import (
     build_file_tools,
     build_mail_tools,
 )
+from verirun.tools.invoice import ExtractIndiaInvoiceTool
 from verirun.tools.vision import ExtractInvoiceTool
 
 
@@ -53,6 +56,43 @@ class Backends:
             mail=MockMailSource(settings.mail_db, settings.shared_dir),
             accounting=MockAccountingSystem(settings.erp_db),
         )
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> Backends:
+        """The product mail source when configured, else the Mock Suite.
+
+        Accounting stays the Mock Suite until the Zoho Books adapter lands.
+        """
+        if settings.imap_host:
+            mail: MailSource = ImapSource(
+                host=settings.imap_host,
+                port=settings.imap_port,
+                username=settings.imap_username,
+                password=settings.imap_password.get_secret_value(),
+                document_root=settings.shared_dir,
+                state_db=settings.mail_state_db,
+                folder=settings.imap_folder,
+                use_ssl=settings.imap_ssl,
+            )
+        elif settings.watch_dir is not None:
+            mail = WatchedFolderSource(
+                settings.watch_dir,
+                settings.shared_dir,
+                settings.mail_state_db,
+            )
+        else:
+            mail = MockMailSource(settings.mail_db, settings.shared_dir)
+        return cls(mail=mail, accounting=MockAccountingSystem(settings.erp_db))
+
+
+def sync_mail(backends: Backends) -> int:
+    """Ingest new mail before a new Run; a resume reads its already-ingested source.
+
+    The CLI calls this before starting a Run. The dashboard only resumes parked
+    Runs, so it deliberately does not sync: a mailbox error must not block an
+    approval decision.
+    """
+    return backends.mail.sync()
 
 
 def build_registry(
@@ -88,6 +128,20 @@ def build_registry(
             )
         tools.append(
             ExtractInvoiceTool(
+                root,
+                client,
+                confidence_threshold=task_pack.extraction.confidence_threshold,
+                prices=settings.prices,
+            )
+        )
+    if task_pack.extraction is not None and INVOICE_EXTRACT_TOOL in task_pack.tools:
+        if client is None:
+            raise ValueError(
+                f"Task Pack '{task_pack.id}' reads India GST invoices; "
+                "build_registry needs an LLM client"
+            )
+        tools.append(
+            ExtractIndiaInvoiceTool(
                 root,
                 client,
                 confidence_threshold=task_pack.extraction.confidence_threshold,
