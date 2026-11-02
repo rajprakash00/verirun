@@ -13,6 +13,21 @@ PO_ID = "4600000000101"
 BILL_ID = "4600000000201"
 
 
+class FakeTokens:
+    """A token manager stand-in for the client and read adapter tests."""
+
+    def __init__(self) -> None:
+        self.requests = 0
+        self.forced = 0
+
+    def access_token(self, *, force: bool = False) -> str:
+        if force:
+            self.forced += 1
+            return "fresh-token"
+        self.requests += 1
+        return "access-token"
+
+
 def fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 

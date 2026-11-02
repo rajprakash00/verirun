@@ -29,14 +29,14 @@ import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
 from verirun.adapters.base import ConflictError, TransientError
+from verirun.adapters.zoho.retry import backoff, retry_after
 
 TOKEN_KEY_ENV = "VERIRUN_ZOHO_TOKEN_KEY"
 TOKEN_URL_PATH = "/oauth/v2/token"
 DEFAULT_EXPIRES_IN_S = 3600
 DEFAULT_SKEW_S = 60.0
-MAX_BACKOFF_S = 8.0
-BASE_BACKOFF_S = 0.5
 SCRYPT_SALT = b"verirun-zoho-token-v1"
+WRITE_SCOPE_SUFFIXES = (".CREATE", ".UPDATE", ".DELETE", ".ALL")
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,7 @@ class ZohoOAuthConfig:
     accounts_domain: str = "https://accounts.zoho.in"
     timeout: float = 30.0
     max_attempts: int = 3
+    read_only: bool = True
 
     @property
     def token_url(self) -> str:
@@ -130,10 +131,6 @@ class ZohoTokenStore:
             with suppress(FileNotFoundError):
                 os.unlink(temporary)
 
-    def clear(self) -> None:
-        with suppress(FileNotFoundError):
-            self.path.unlink()
-
 
 class ZohoTokenManager:
     """Return a usable access token, refreshing it when it is near expiry."""
@@ -157,6 +154,8 @@ class ZohoTokenManager:
 
     def access_token(self, *, force: bool = False) -> str:
         cached = self.store.load()
+        if cached is not None and self.config.read_only:
+            _require_read_only_scope(cached.scope)
         if cached is not None and not force and cached.usable(self._clock(), self._skew):
             return cached.access_token
         refresh_token = (cached.refresh_token if cached else "") or self.config.refresh_token
@@ -186,19 +185,33 @@ class ZohoTokenManager:
                 "VERIRUN_ZOHO_READ_REFRESH_TOKEN."
             )
         try:
-            expires_in = int(payload.get("expires_in") or payload.get("expires_in_sec") or DEFAULT_EXPIRES_IN_S)
+            expires_in = int(
+                payload.get("expires_in")
+                or payload.get("expires_in_sec")
+                or DEFAULT_EXPIRES_IN_S
+            )
         except (TypeError, ValueError):
             expires_in = DEFAULT_EXPIRES_IN_S
+        scope = str(payload.get("scope", ""))
+        if self.config.read_only:
+            _require_read_only_scope(scope)
         return ZohoToken(
             access_token=access_token,
             refresh_token=str(payload.get("refresh_token") or refresh_token),
             expires_at=self._clock() + expires_in,
-            scope=str(payload.get("scope", "")),
+            scope=scope,
             api_domain=str(payload.get("api_domain", "")),
         )
 
     def _post_refresh(self, refresh_token: str) -> httpx.Response:
-        http = self._http or httpx.Client(timeout=self.config.timeout)
+        if self._http is not None:
+            return self._post_refresh_with(self._http, refresh_token)
+        with httpx.Client(timeout=self.config.timeout) as http:
+            return self._post_refresh_with(http, refresh_token)
+
+    def _post_refresh_with(
+        self, http: httpx.Client, refresh_token: str
+    ) -> httpx.Response:
         data = {
             "grant_type": "refresh_token",
             "client_id": self.config.client_id,
@@ -213,7 +226,7 @@ class ZohoTokenManager:
                 last_error = f"Zoho OAuth token request failed: {type(exc).__name__}"
                 if attempt == self.config.max_attempts:
                     raise TransientError(last_error) from exc
-                self._sleep(_backoff(attempt))
+                self._sleep(backoff(attempt))
                 continue
             if response.status_code == 200:
                 return response
@@ -223,7 +236,7 @@ class ZohoTokenManager:
                 )
                 if attempt == self.config.max_attempts:
                     raise TransientError(last_error)
-                self._sleep(_retry_after(response) or _backoff(attempt))
+                self._sleep(retry_after(response) or backoff(attempt))
                 continue
             error = _error_code(response)
             raise ConflictError(
@@ -241,18 +254,16 @@ def _fernet(key: str) -> Fernet:
     return Fernet(base64.urlsafe_b64encode(derived))
 
 
-def _backoff(attempt: int) -> float:
-    return min(MAX_BACKOFF_S, BASE_BACKOFF_S * (2 ** (attempt - 1)))
-
-
-def _retry_after(response: httpx.Response) -> float | None:
-    raw = response.headers.get("Retry-After")
-    if raw is None:
-        return None
-    try:
-        return min(MAX_BACKOFF_S, max(0.0, float(raw)))
-    except ValueError:
-        return None
+def _require_read_only_scope(scope: str) -> None:
+    if not scope.strip():
+        return
+    values = [item.strip() for item in scope.replace(",", " ").split()]
+    writes = [item for item in values if item.upper().endswith(WRITE_SCOPE_SUFFIXES)]
+    if writes:
+        raise ConflictError(
+            "Zoho OAuth returned a write-scoped token for the read-only client: "
+            f"{', '.join(writes)}. Use a refresh token with only ZohoBooks.*.READ scopes."
+        )
 
 
 def _error_code(response: httpx.Response) -> str:

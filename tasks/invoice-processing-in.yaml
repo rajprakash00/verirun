@@ -35,3 +35,5 @@ verification:
     check: accounting_invoice_matches
     params:
       require_purchase_order: false
+      purchase_order_statuses:
+        - open

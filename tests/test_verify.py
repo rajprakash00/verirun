@@ -668,6 +668,7 @@ def india_accounting(
     vendor_tax_id: str = GSTIN,
     vendor_name: str = SUPPLIER,
     po_amount_cents: int = TOTAL_PAISE,
+    po_status: str = "open",
     bills: tuple[Bill, ...] = (),
 ) -> InMemoryAccountingSystem:
     return InMemoryAccountingSystem(
@@ -689,7 +690,7 @@ def india_accounting(
                 vendor_id="V-IN-1001",
                 amount_cents=po_amount_cents,
                 currency="INR",
-                status="open",
+                status=po_status,
                 issued_at=CREATED_AT,
             )
         ],
@@ -788,6 +789,7 @@ def test_a_duplicate_invoice_fails_the_match(tmp_path: Path) -> None:
     assert not result.ok
     assert "INV-Z1" in result.detail
     assert "already" in result.detail
+    assert "accounting:bill:INV-Z1" in result.evidence
 
 
 def test_a_vendor_gstin_mismatch_fails_the_match(tmp_path: Path) -> None:
@@ -807,6 +809,50 @@ def test_a_vendor_gstin_mismatch_fails_the_match(tmp_path: Path) -> None:
     result = store.get_verification("RUN-0001")[0]
     assert not result.ok
     assert "GSTIN" in result.detail
+
+
+def test_a_void_bill_does_not_block_the_match(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+    voided = Bill(
+        id="INV-Z2",
+        number=INVOICE_NUMBER,
+        vendor_id="V-IN-1001",
+        po_id=PO_ID,
+        gr_id=None,
+        amount_cents=TOTAL_PAISE,
+        currency="INR",
+        status="rejected",
+        received_at=CREATED_AT,
+    )
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=india_accounting(bills=(voided,)),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.COMPLETED
+
+
+def test_a_cancelled_purchase_order_fails_the_match(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=india_accounting(po_status="cancelled"),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.FAILED
+    assert "purchase order" in store.get_verification("RUN-0001")[0].detail
 
 
 def test_a_purchase_order_amount_mismatch_fails_the_match(tmp_path: Path) -> None:

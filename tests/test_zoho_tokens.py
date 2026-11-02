@@ -47,12 +47,14 @@ def manager(
     calls: list[httpx.Request],
     *,
     clock: Clock | None = None,
+    read_only: bool = True,
 ) -> ZohoTokenManager:
     config = ZohoOAuthConfig(
         client_id="client-id",
         client_secret="client-secret",
         refresh_token="refresh-token-1",
         accounts_domain="https://accounts.zoho.in",
+        read_only=read_only,
     )
     return ZohoTokenManager(
         config,
@@ -173,6 +175,37 @@ def test_exhausted_token_endpoint_transient_failures_are_transient(tmp_path: Pat
     oauth = manager(tmp_path, handler, [])
 
     with pytest.raises(TransientError):
+        oauth.access_token()
+
+
+def test_a_write_scoped_token_is_rejected_by_the_read_only_client(
+    tmp_path: Path,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={**TOKEN_RESPONSE, "scope": "ZohoBooks.bills.CREATE"},
+        )
+
+    oauth = manager(tmp_path, handler, [])
+
+    with pytest.raises(ConflictError, match="read-only"):
+        oauth.access_token()
+
+
+def test_a_cached_write_scoped_token_is_rejected(tmp_path: Path) -> None:
+    store = ZohoTokenStore(tmp_path / "zoho-token.enc", "operator-secret")
+    store.save(
+        ZohoToken(
+            access_token="access-token-1",
+            refresh_token="refresh-token-1",
+            expires_at=2_000_000.0,
+            scope="ZohoBooks.bills.ALL",
+        )
+    )
+    oauth = manager(tmp_path, lambda request: httpx.Response(200), [])
+
+    with pytest.raises(ConflictError, match="read-only"):
         oauth.access_token()
 
 

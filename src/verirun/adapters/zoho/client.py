@@ -16,14 +16,13 @@ from typing import Any
 import httpx
 
 from verirun.adapters.base import ConflictError, NotFoundError, TransientError
+from verirun.adapters.zoho.retry import backoff, retry_after
 from verirun.adapters.zoho.tokens import ZohoTokenManager
 
 DEFAULT_BASE_URL = "https://www.zohoapis.in/books/v3"
 DEFAULT_TIMEOUT_S = 30.0
 DEFAULT_PER_PAGE = 200
 MAX_PAGES = 1_000
-MAX_BACKOFF_S = 8.0
-BASE_BACKOFF_S = 0.5
 NOT_FOUND_CODES = frozenset({1002})
 
 
@@ -73,7 +72,7 @@ class ZohoBooksClient:
                 last_error = f"Zoho Books request failed: {type(exc).__name__}"
                 if attempt == self.max_attempts:
                     raise TransientError(last_error) from exc
-                self._sleep(_backoff(attempt))
+                self._sleep(backoff(attempt))
                 continue
             if response.status_code == 401 and not refreshed:
                 refreshed = True
@@ -88,7 +87,7 @@ class ZohoBooksClient:
                 last_error = f"Zoho Books returned HTTP {response.status_code} for {path}"
                 if attempt == self.max_attempts:
                     raise TransientError(last_error)
-                self._sleep(_retry_after(response) or _backoff(attempt))
+                self._sleep(retry_after(response) or backoff(attempt))
                 continue
             if response.status_code == 404:
                 raise NotFoundError(_error_message(response, path))
@@ -128,20 +127,6 @@ class ZohoBooksClient:
                 raise NotFoundError(message, data={"zoho_code": code, "path": path})
             raise ConflictError(message, data={"zoho_code": code, "path": path})
         return payload
-
-
-def _backoff(attempt: int) -> float:
-    return min(MAX_BACKOFF_S, BASE_BACKOFF_S * (2 ** (attempt - 1)))
-
-
-def _retry_after(response: httpx.Response) -> float | None:
-    raw = response.headers.get("Retry-After")
-    if raw is None:
-        return None
-    try:
-        return min(MAX_BACKOFF_S, max(0.0, float(raw)))
-    except ValueError:
-        return None
 
 
 def _error_message(response: httpx.Response, path: str) -> str:

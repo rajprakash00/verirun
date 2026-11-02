@@ -5,31 +5,16 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from tests.zoho_fixture import FakeTokens
 from verirun.adapters import ConflictError, NotFoundError, TransientError
 from verirun.adapters.zoho.client import ZohoBooksClient
 
 
-class FakeTokens:
-    def __init__(self) -> None:
-        self.requests = 0
-        self.forced = 0
-
-    def access_token(self, *, force: bool = False) -> str:
-        if force:
-            self.forced += 1
-            return "fresh-token"
-        self.requests += 1
-        return "access-token"
-
-
 def client(handler, *, sleep=None, tokens=None, max_attempts=3) -> ZohoBooksClient:
-    calls: list[httpx.Request] = []
-
     def record(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
         return handler(request)
 
-    result = ZohoBooksClient(
+    return ZohoBooksClient(
         token_manager=tokens or FakeTokens(),
         organization_id="6000000000001",
         base_url="https://www.zohoapis.in/books/v3",
@@ -37,8 +22,6 @@ def client(handler, *, sleep=None, tokens=None, max_attempts=3) -> ZohoBooksClie
         sleep=sleep or (lambda seconds: None),
         max_attempts=max_attempts,
     )
-    result.calls = calls  # type: ignore[attr-defined]
-    return result
 
 
 def page(items: list[dict], number: int, *, more: bool) -> dict:
@@ -60,6 +43,7 @@ def test_pagination_follows_page_context_until_the_last_page() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(dict(request.url.params))
+        assert request.headers["Authorization"] == "Zoho-oauthtoken access-token"
         number = int(request.url.params["page"])
         if number == 1:
             return httpx.Response(200, json=page([{"id": "1"}, {"id": "2"}], 1, more=True))
@@ -72,7 +56,6 @@ def test_pagination_follows_page_context_until_the_last_page() -> None:
     assert [item["id"] for item in items] == ["1", "2", "3"]
     assert [entry["page"] for entry in seen] == ["1", "2"]
     assert all(entry["organization_id"] == "6000000000001" for entry in seen)
-    assert api.calls[0].headers["Authorization"] == "Zoho-oauthtoken access-token"
 
 
 def test_a_rate_limited_request_is_retried_after_retry_after() -> None:
@@ -82,13 +65,13 @@ def test_a_rate_limited_request_is_retried_after_retry_after() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         attempts["count"] += 1
         if attempts["count"] == 1:
-            return httpx.Response(429, headers={"Retry-After": "3"}, json={"code": 429})
+            return httpx.Response(429, headers={"Retry-After": "60"}, json={"code": 45})
         return httpx.Response(200, json={"code": 0, "contact": {"contact_id": "1"}})
 
     api = client(handler, sleep=sleeps.append)
 
     assert api.get("/contacts/1")["contact"]["contact_id"] == "1"
-    assert sleeps == [3.0]
+    assert sleeps == [60.0]
     assert attempts["count"] == 2
 
 

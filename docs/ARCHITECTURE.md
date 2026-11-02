@@ -215,9 +215,9 @@ evidence references. Screenshots are display evidence only.
 
 The India pack's `accounting_invoice_matches` check resolves each extracted invoice
 against the read-only accounting client: one vendor whose GSTIN and name agree, no
-bill with the same vendor and number, and, when the source cites a purchase order,
-one order whose amount and currency agree. Evidence references are system ids such as
-`accounting:vendor:<id>` and `accounting:purchaseorder:<id>`.
+live bill with the same vendor and number, and, when the source cites a purchase order,
+one open order whose amount and currency agree. Evidence references are system ids such
+as `accounting:vendor:<id>` and `accounting:purchaseorder:<id>`.
 
 The eval harness has two eval-only switches that the product paths leave at their defaults.
 Disabling the Verifier accepts the executor's outcome without a verification pass and writes

@@ -36,7 +36,9 @@ engine.
    actionable conflict; no token appears in a message, log, or Evidence Pack.
    The read-only scope set is `ZohoBooks.contacts.READ`,
    `ZohoBooks.purchaseorders.READ`, `ZohoBooks.bills.READ`, and
-   `ZohoBooks.vendorpayments.READ`.
+   `ZohoBooks.vendorpayments.READ`. A token that carries a `.CREATE`,
+   `.UPDATE`, `.DELETE`, or `.ALL` scope is rejected by the read-only client
+   instead of being trusted with the label.
 3. **One HTTP client owns transport policy.** It walks every page of a list,
    retries 429 and 5xx with exponential backoff, honours `Retry-After`, refreshes
    the access token once on 401, and maps 404 and Zoho code 1002 to
@@ -46,8 +48,8 @@ engine.
    bills map Zoho's `draft`/`open`/`paid`/`void` states to the existing
    `received`/`approved`/`paid`/`rejected`, and money strings become integer
    paise. `find_vendors` and `list_bills` filter locally after reading, so exact
-   GSTIN, name, and invoice-number matching does not depend on Zoho's search
-   syntax.
+   GSTIN and invoice-number matching does not depend on Zoho's search syntax;
+   vendor names compare after case and punctuation are folded away.
 5. **Goods receipts are absent, not invented.** `get_goods_receipt` raises
    `NotFoundError` with a message naming Zoho Books. The Mock Suite still
    exercises the goods-receipt path; Zoho bills never carry a `gr_id`.
@@ -59,10 +61,11 @@ engine.
    `accounting_invoice_matches` reads the Run's successful `invoice.extract`
    observation for the supplier, GSTIN, number, total, and PO reference, then
    resolves them through `AccountingReads`. It fails on an ambiguous vendor, a
-   GSTIN or name mismatch, an existing bill, or a PO amount/currency mismatch.
-   Evidence references are real system ids: `accounting:vendor:<id>`,
-   `accounting:no-bill:<vendor>:<number>`, and
-   `accounting:purchaseorder:<id>`.
+   GSTIN or name mismatch, a live bill with the same number, or a PO that is not
+   open or whose amount/currency differs. Evidence references are real system
+   ids: `accounting:vendor:<id>`, `accounting:no-bill:<vendor>:<number>`, and
+   `accounting:purchaseorder:<id>`; a duplicate failure cites the existing
+   `accounting:bill:<id>`.
 
 ## Alternatives considered
 

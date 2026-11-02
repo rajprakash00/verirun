@@ -26,6 +26,7 @@ from verirun.adapters import (
     PurchaseOrder,
     Vendor,
 )
+from verirun.adapters.matching import gstin_key, name_key, reference_key
 from verirun.context.task_pack import INVOICE_EXTRACT_TOOL, TaskPack
 from verirun.engine.models import CheckResult
 from verirun.engine.states import RunState
@@ -359,6 +360,10 @@ def check_accounting_invoice_matches(
     number, or a PO whose amount or currency differs.
     """
     require_purchase_order = bool(params.get("require_purchase_order", False))
+    raw_statuses = params.get("purchase_order_statuses", ["open"])
+    if isinstance(raw_statuses, str):
+        raw_statuses = [raw_statuses]
+    purchase_order_statuses = {str(status).casefold() for status in raw_statuses}
     extractions = [
         record
         for record in context.store.list_observations(context.run.id)
@@ -400,20 +405,25 @@ def check_accounting_invoice_matches(
             )
             continue
         vendor = vendors[0]
-        if _gstin(vendor.tax_id) != _gstin(gstin):
+        if gstin_key(vendor.tax_id) != gstin_key(gstin):
             failures.append(
                 f"{number}: vendor {vendor.id} GSTIN {vendor.tax_id!r} does not match "
                 f"the source GSTIN {gstin!r}"
             )
             continue
-        if _name_key(vendor.name) != _name_key(name):
+        if name_key(vendor.name) != name_key(name):
             failures.append(
                 f"{number}: vendor {vendor.id} name {vendor.name!r} does not match "
                 f"the source name {name!r}"
             )
             continue
-        existing = _bills(context, number=number, vendor_id=vendor.id)
+        existing = [
+            bill
+            for bill in _bills(context, number=number, vendor_id=vendor.id)
+            if bill.status in LIVE_BILL_STATUSES
+        ]
         if existing:
+            evidence.append(f"accounting:bill:{existing[0].id}")
             failures.append(
                 f"{number}: {context.accounting.display_name} already has a bill "
                 f"for vendor {vendor.id} as {existing[0].id}"
@@ -424,8 +434,12 @@ def check_accounting_invoice_matches(
             orders = [
                 order
                 for order in _purchase_orders(context, vendor_id=vendor.id)
-                if _reference_key(order.number or order.id) == _reference_key(purchase_order)
-                or _reference_key(order.id) == _reference_key(purchase_order)
+                if order.status.casefold() in purchase_order_statuses
+                and (
+                    reference_key(order.number or order.id)
+                    == reference_key(purchase_order)
+                    or reference_key(order.id) == reference_key(purchase_order)
+                )
             ]
             if len(orders) != 1:
                 failures.append(
@@ -479,18 +493,6 @@ def _po_reference(data: dict[str, Any]) -> str | None:
     if isinstance(parsed_reference, str) and parsed_reference.strip():
         return parsed_reference.strip()
     return None
-
-
-def _gstin(value: str) -> str:
-    return "".join(value.split()).upper()
-
-
-def _name_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", value.casefold())
-
-
-def _reference_key(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
 def check_file_archived(params: dict[str, Any], context: VerificationContext) -> CheckOutcome:

@@ -174,9 +174,9 @@ tickets.
 ### Zoho Books read-only matching (Phase 1)
 
 Setting the Zoho Books settings below swaps the accounting adapter from
-LedgerLite to Zoho Books India. The Verifier gets its own `AccountingReads`
-object built from a read-only OAuth token; the executor never receives that
-token, and no bill is created on this path.
+LedgerLite to Zoho Books India. The token is read-only; the Verifier gets its
+own `AccountingReads` object with no write method, and no bill is created on
+this path. The write path will get a separate write token.
 
 | Setting | Purpose |
 | --- | --- |
@@ -197,7 +197,7 @@ The recorded-fixture contract lives in `tests/test_zoho_client.py`,
 before a pilot, export the same settings and run:
 
 ```bash
-uv run pytest tests/test_zoho_live.py
+VERIRUN_ZOHO_LIVE=1 uv run pytest tests/test_zoho_live.py
 ```
 
 To run the same read-only match end to end against the configured trial (no

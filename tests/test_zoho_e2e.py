@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -21,7 +22,7 @@ from tests.india_fixture import (
 )
 from tests.support import ROOT, ScriptedClient, text_turn, tool_turn
 from tests.zoho_fixture import PO_ID as ZOHO_PO_ID
-from tests.zoho_fixture import VENDOR_ID, recorded
+from tests.zoho_fixture import VENDOR_ID, fixture, recorded
 from verirun.adapters import WatchedFolderSource
 from verirun.adapters.zoho import (
     ZohoAccountingReads,
@@ -163,9 +164,9 @@ def script(message_id: str, attachment_path: str) -> ScriptedClient:
     )
 
 
-def test_a_fixture_invoice_is_matched_against_recorded_zoho_books(
-    tmp_path: Path,
-) -> None:
+def run_scenario(
+    tmp_path: Path, *, handler=recorded, run_id: str = "RUN-ZOHO-0001"
+) -> tuple[Any, dict, SpyAccounting, ZohoTokenStore]:
     watch = tmp_path / "watch"
     watch.mkdir()
     write_invoice_pdf(watch / PDF_FILENAME)
@@ -176,10 +177,9 @@ def test_a_fixture_invoice_is_matched_against_recorded_zoho_books(
     message = mail.read_message(summary.id)
     attachment = message.attachments[0]
 
-    reads, token_store = zoho_reads(tmp_path)
+    reads, token_store = zoho_reads(tmp_path, handler)
     write = SpyAccounting(reads)
     backends = Backends(mail=mail, accounting=write, reads=reads)
-    chosen = settings(tmp_path)
     context = load_company_context(chosen.company_dir)
     pack = load_task_pack(ROOT / "tasks" / "invoice-processing-in.yaml")
     store = RunStore(chosen.run_db)
@@ -196,14 +196,39 @@ def test_a_fixture_invoice_is_matched_against_recorded_zoho_books(
         accounting=backends.verifier_accounting,
         shared_root=mail.document_root,
         evidence_root=chosen.run_db.parent,
-        run_id="RUN-ZOHO-0001",
+        run_id=run_id,
     )
-
-    assert run.state is RunState.COMPLETED, run.error
-    assert backends.verifier_accounting is reads
     evidence = json.loads(
         (chosen.run_db.parent / run.id / "evidence.json").read_text(encoding="utf-8")
     )
+    return run, evidence, write, token_store
+
+
+def duplicate_bill(request: httpx.Request) -> httpx.Response:
+    if request.url.path.endswith("/bills"):
+        payload = fixture("bills-page-1.json")
+        payload["bills"].append(
+            {
+                "bill_id": "4600000000209",
+                "bill_number": INVOICE_NUMBER,
+                "vendor_id": VENDOR_ID,
+                "vendor_name": "Paper Trail Supplies Pvt. Ltd.",
+                "total": "11800.00",
+                "currency_code": "INR",
+                "status": "open",
+                "date": "2026-09-05",
+            }
+        )
+        return httpx.Response(200, json=payload)
+    return recorded(request)
+
+
+def test_a_fixture_invoice_is_matched_against_recorded_zoho_books(
+    tmp_path: Path,
+) -> None:
+    run, evidence, write, token_store = run_scenario(tmp_path)
+
+    assert run.state is RunState.COMPLETED, run.error
     checks = {check["id"]: check for check in evidence["verification"]["checks"]}
     assert evidence["verification"]["passed"] is True
     match = checks["accounting-invoice-matches"]
@@ -223,3 +248,19 @@ def test_a_fixture_invoice_is_matched_against_recorded_zoho_books(
     assert b"zoho-access-token" not in raw
     assert b"zoho-refresh-token" not in raw
     assert not any(item["tool"] == "erp.file_invoice" for item in evidence["observations"])
+
+
+def test_a_duplicate_bill_in_zoho_fails_with_the_existing_bill_as_evidence(
+    tmp_path: Path,
+) -> None:
+    run, evidence, write, _ = run_scenario(
+        tmp_path, handler=duplicate_bill, run_id="RUN-ZOHO-0002"
+    )
+
+    assert run.state is RunState.FAILED
+    checks = {check["id"]: check for check in evidence["verification"]["checks"]}
+    match = checks["accounting-invoice-matches"]
+    assert match["ok"] is False
+    assert "4600000000209" in match["detail"]
+    assert "accounting:bill:4600000000209" in match["evidence"]
+    assert write.calls == ["list_vendors", "list_purchase_orders"]

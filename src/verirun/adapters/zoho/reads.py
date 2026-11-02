@@ -28,6 +28,7 @@ from verirun.adapters.base import (
     UnsupportedError,
     Vendor,
 )
+from verirun.adapters.matching import gstin_key, name_key
 from verirun.adapters.zoho.client import ZohoBooksClient
 
 BILL_STATUSES = {
@@ -92,13 +93,13 @@ class ZohoAccountingReads(AccountingReads):
         vendors = self.list_vendors()
         if name is None and tax_id is None:
             return vendors
-        wanted_tax_id = _gstin(tax_id) if tax_id is not None else None
-        wanted_name = name.strip().casefold() if name is not None else None
+        wanted_tax_id = gstin_key(tax_id) if tax_id is not None else None
+        wanted_name = name_key(name) if name is not None else None
         return [
             vendor
             for vendor in vendors
-            if (wanted_tax_id is not None and _gstin(vendor.tax_id) == wanted_tax_id)
-            or (wanted_name is not None and vendor.name.strip().casefold() == wanted_name)
+            if (wanted_tax_id is not None and gstin_key(vendor.tax_id) == wanted_tax_id)
+            or (wanted_name is not None and name_key(vendor.name) == wanted_name)
         ]
 
     # Purchase orders and receipts ------------------------------------------
@@ -212,7 +213,6 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
 
     def __init__(self, reads: ZohoAccountingReads) -> None:
         super().__init__(reads.client)
-        self.reads = reads
 
     def create_purchase_bill(
         self,
@@ -235,8 +235,13 @@ def _is_vendor(contact: dict[str, Any]) -> bool:
 
 def _vendor(contact: dict[str, Any]) -> Vendor:
     return Vendor(
-        id=_text(contact.get("contact_id") or contact.get("id"), "vendor id"),
-        name=_text(contact.get("contact_name") or contact.get("company_name"), "vendor name"),
+        id=_required_text(
+            contact.get("contact_id") or contact.get("id"), "vendor id"
+        ),
+        name=_required_text(
+            contact.get("contact_name") or contact.get("company_name"),
+            "vendor name",
+        ),
         tax_id=_text(contact.get("gst_no") or contact.get("tax_id")),
         email=_text(contact.get("email")),
         address=_address(contact.get("billing_address")),
@@ -246,13 +251,17 @@ def _vendor(contact: dict[str, Any]) -> Vendor:
 
 
 def _purchase_order(order: dict[str, Any]) -> PurchaseOrder:
-    po_id = _text(
-        order.get("purchaseorder_id") or order.get("purchase_order_id") or order.get("id"),
+    po_id = _required_text(
+        order.get("purchaseorder_id")
+        or order.get("purchase_order_id")
+        or order.get("id"),
         "purchase order id",
     )
     return PurchaseOrder(
         id=po_id,
-        vendor_id=_text(order.get("vendor_id"), "purchase order vendor"),
+        vendor_id=_required_text(
+            order.get("vendor_id"), "purchase order vendor"
+        ),
         amount_cents=_cents(order.get("total"), "purchase order total"),
         currency=_text(order.get("currency_code") or "INR"),
         status=PURCHASE_ORDER_STATUSES.get(
@@ -271,11 +280,13 @@ def _bill(bill: dict[str, Any]) -> Bill:
     if isinstance(po_ids, list) and po_ids:
         first = po_ids[0]
         po_id = str(first.get("purchaseorder_id") if isinstance(first, dict) else first)
-    raw_status = _text(bill.get("status") or "draft").casefold()
+    raw_status = _text(bill.get("status") or "draft").casefold().replace(" ", "_")
     return Bill(
-        id=_text(bill.get("bill_id") or bill.get("id"), "bill id"),
-        number=_text(bill.get("bill_number") or bill.get("number"), "bill number"),
-        vendor_id=_text(bill.get("vendor_id"), "bill vendor"),
+        id=_required_text(bill.get("bill_id") or bill.get("id"), "bill id"),
+        number=_required_text(
+            bill.get("bill_number") or bill.get("number"), "bill number"
+        ),
+        vendor_id=_required_text(bill.get("vendor_id"), "bill vendor"),
         po_id=po_id,
         gr_id=None,
         amount_cents=_cents(bill.get("total"), "bill total"),
@@ -287,17 +298,15 @@ def _bill(bill: dict[str, Any]) -> Bill:
 
 def _payment(payment: dict[str, Any], bill_id: str) -> Payment:
     return Payment(
-        id=_text(payment.get("payment_id") or payment.get("id"), "payment id"),
+        id=_required_text(
+            payment.get("payment_id") or payment.get("id"), "payment id"
+        ),
         bill_id=_text(payment.get("bill_id") or bill_id),
         amount_cents=_cents(payment.get("amount"), "payment amount"),
         currency=_text(payment.get("currency_code") or "INR"),
         scheduled_for=_text(payment.get("date") or payment.get("scheduled_for")),
         status=_text(payment.get("status") or "paid").casefold(),
     )
-
-
-def _gstin(raw: str) -> str:
-    return raw.strip().upper().replace(" ", "")
 
 
 def _address(raw: Any) -> str:
@@ -328,10 +337,12 @@ def _cents(raw: Any, field: str) -> int:
     return int(paise)
 
 
-def _text(raw: Any, field: str = "") -> str:
-    if raw is None:
-        return ""
-    text = str(raw)
-    if not text and field:
+def _text(raw: Any) -> str:
+    return "" if raw is None else str(raw)
+
+
+def _required_text(raw: Any, field: str) -> str:
+    text = _text(raw)
+    if not text:
         raise AdapterError(f"Zoho Books returned no {field}")
     return text

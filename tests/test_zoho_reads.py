@@ -13,7 +13,7 @@ import time
 import httpx
 import pytest
 
-from tests.zoho_fixture import PO_ID, VENDOR_ID, fixture, recorded
+from tests.zoho_fixture import PO_ID, VENDOR_ID, FakeTokens, fixture, recorded
 from verirun.adapters import (
     NotFoundError,
     UnsupportedError,
@@ -21,11 +21,6 @@ from verirun.adapters import (
 from verirun.adapters.zoho import ZohoAccountingReads, ZohoAccountingSystem, ZohoBooksClient
 
 GSTIN = "29AABCV1234C1ZQ"
-
-
-class FakeTokens:
-    def access_token(self, *, force: bool = False) -> str:
-        return "access-token"
 
 
 class FakeClock:
@@ -59,7 +54,7 @@ def test_vendors_are_read_across_pages_and_matched_by_gstin_and_name() -> None:
 
     vendors = reads.list_vendors()
     by_gstin = reads.find_vendors(tax_id=GSTIN)
-    by_name = reads.find_vendors(name="paper trail supplies pvt. ltd.")
+    by_name = reads.find_vendors(name="Paper Trail Supplies Pvt Ltd")
     vendor = reads.get_vendor(VENDOR_ID)
 
     assert [item.id for item in vendors] == ["4600000000001", "4600000000002"]
