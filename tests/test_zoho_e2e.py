@@ -180,6 +180,7 @@ def run_scenario(
     reads, token_store = zoho_reads(tmp_path, handler)
     write = SpyAccounting(reads)
     backends = Backends(mail=mail, accounting=write, reads=reads)
+    assert backends.verifier_accounting is reads
     context = load_company_context(chosen.company_dir)
     pack = load_task_pack(ROOT / "tasks" / "invoice-processing-in.yaml")
     store = RunStore(chosen.run_db)
