@@ -15,6 +15,14 @@ from verirun.adapters import (
     MockMailSource,
     WatchedFolderSource,
 )
+from verirun.adapters.zoho import (
+    ZohoAccountingReads,
+    ZohoAccountingSystem,
+    ZohoBooksClient,
+    ZohoOAuthConfig,
+    ZohoTokenManager,
+    ZohoTokenStore,
+)
 from verirun.config import Settings
 from verirun.context.company import CompanyContext
 from verirun.context.task_pack import INVOICE_EXTRACT_TOOL, SCAN_TOOL, TaskPack
@@ -59,9 +67,11 @@ class Backends:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Backends:
-        """The product mail source when configured, else the Mock Suite.
+        """The product mail source and Zoho Books reads when configured.
 
-        Accounting stays the Mock Suite until the Zoho Books adapter lands.
+        Zoho Books is used only when its configuration is complete. A partial
+        configuration is an error: silently falling back to the Mock Suite
+        would file a real invoice in the wrong system.
         """
         if settings.imap_host:
             mail: MailSource = ImapSource(
@@ -82,7 +92,53 @@ class Backends:
             )
         else:
             mail = MockMailSource(settings.mail_db, settings.shared_dir)
-        return cls(mail=mail, accounting=MockAccountingSystem(settings.erp_db))
+        zoho = _zoho_accounting(settings)
+        if zoho is None:
+            return cls(mail=mail, accounting=MockAccountingSystem(settings.erp_db))
+        reads, accounting = zoho
+        return cls(mail=mail, accounting=accounting, reads=reads)
+
+
+def _zoho_accounting(settings: Settings) -> tuple[ZohoAccountingReads, ZohoAccountingSystem] | None:
+    """Build the read-only Zoho client, or ``None`` for the Mock Suite."""
+    configured = {
+        "VERIRUN_ZOHO_ORGANIZATION_ID": settings.zoho_organization_id,
+        "VERIRUN_ZOHO_CLIENT_ID": settings.zoho_client_id,
+        "VERIRUN_ZOHO_CLIENT_SECRET": settings.zoho_client_secret.get_secret_value(),
+        "VERIRUN_ZOHO_TOKEN_KEY": settings.zoho_token_key.get_secret_value(),
+    }
+    refresh_token = settings.zoho_read_refresh_token.get_secret_value()
+    requested = any(configured.values()) or bool(refresh_token)
+    if not requested:
+        return None
+    missing = [name for name, value in configured.items() if not value]
+    if missing:
+        raise ValueError(
+            "Zoho Books is partially configured; set " + ", ".join(missing)
+        )
+    if not refresh_token and not settings.zoho_read_token_file.is_file():
+        raise ValueError(
+            "Zoho Books needs VERIRUN_ZOHO_READ_REFRESH_TOKEN or an existing "
+            f"token file at {settings.zoho_read_token_file}"
+        )
+    oauth = ZohoOAuthConfig(
+        client_id=settings.zoho_client_id,
+        client_secret=settings.zoho_client_secret.get_secret_value(),
+        refresh_token=refresh_token,
+        accounts_domain=settings.zoho_accounts_domain,
+        timeout=settings.zoho_timeout_s,
+    )
+    store = ZohoTokenStore(
+        settings.zoho_read_token_file, settings.zoho_token_key.get_secret_value()
+    )
+    client = ZohoBooksClient(
+        token_manager=ZohoTokenManager(oauth, store),
+        organization_id=settings.zoho_organization_id,
+        base_url=settings.zoho_api_base_url,
+        timeout=settings.zoho_timeout_s,
+    )
+    reads = ZohoAccountingReads(client)
+    return reads, ZohoAccountingSystem(reads)
 
 
 def sync_mail(backends: Backends) -> int:

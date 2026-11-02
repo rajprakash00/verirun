@@ -166,9 +166,48 @@ Attachments are stored content-addressed under
 `VERIRUN_SHARED_DIR/attachments/`; reconnecting or a UIDVALIDITY change does not
 reprocess an ingested message. `invoice.extract` reads an India GST text-layer
 PDF with a confidence and citation per field, and records GSTIN and tax
-validations in the Evidence Pack. The India Task Pack ships extraction and
-archive today; the GST verification contract, INR approval rules, and the Zoho
-Books read/write path are the next Phase 1 tickets.
+validations in the Evidence Pack. The India Task Pack's Verifier matches the
+extraction to the accounting system's vendor, duplicate bills, and purchase
+orders; GST verification checks and INR approval rules are the next Phase 1
+tickets.
+
+### Zoho Books read-only matching (Phase 1)
+
+Setting the Zoho Books settings below swaps the accounting adapter from
+LedgerLite to Zoho Books India. The Verifier gets its own `AccountingReads`
+object built from a read-only OAuth token; the executor never receives that
+token, and no bill is created on this path.
+
+| Setting | Purpose |
+| --- | --- |
+| `VERIRUN_ZOHO_ORGANIZATION_ID` | The Zoho Books India organisation id. |
+| `VERIRUN_ZOHO_CLIENT_ID`, `_CLIENT_SECRET` | A Self Client from the Zoho API console (India DC). |
+| `VERIRUN_ZOHO_READ_REFRESH_TOKEN` | A refresh token with `ZohoBooks.contacts.READ`, `ZohoBooks.purchaseorders.READ`, `ZohoBooks.bills.READ`, and `ZohoBooks.vendorpayments.READ`. |
+| `VERIRUN_ZOHO_TOKEN_KEY` | Operator secret used to encrypt the token file at rest. |
+| `VERIRUN_ZOHO_READ_TOKEN_FILE` | Encrypted token cache (default `runs/zoho-read-token.enc`). |
+| `VERIRUN_ZOHO_ACCOUNTS_DOMAIN`, `_API_BASE_URL` | Default `https://accounts.zoho.in` and `https://www.zohoapis.in/books/v3`. |
+
+Zoho creates the refresh token once; Verirun refreshes the short-lived access
+token and writes both to the encrypted token file. If the file exists, the
+refresh token can be removed from the environment. A partial Zoho configuration
+is an error rather than a silent fallback to LedgerLite.
+
+The recorded-fixture contract lives in `tests/test_zoho_client.py`,
+`tests/test_zoho_reads.py`, and `tests/test_zoho_e2e.py`. To check a real trial
+before a pilot, export the same settings and run:
+
+```bash
+uv run pytest tests/test_zoho_live.py
+```
+
+To run the same read-only match end to end against the configured trial (no
+purchase bill is created):
+
+```bash
+uv run verirun run "Match the GST invoice in the AP mailbox" \
+  --task invoice-processing-in
+```
+
 
 ## Dashboard
 
@@ -358,13 +397,14 @@ the Company Context change.
 
 What is not built:
 
-- **Zoho Books and the India verification contract.** The product path can
-  ingest an AP mailbox over IMAP or a watched folder, and
-  `invoice-processing-in` extracts India GST fields with validations and
-  archives the source, but no Zoho Books connection exists yet; the GST
-  verification checks and INR approval rules land with the Zoho tickets.
-  MailDesk, LedgerLite, and the shared file tree stand in for the mailbox, ERP,
-  and document store; payments are scheduled, not transferred; no email is sent.
+- **Zoho Books write path and the India verification contract.** The product
+  path can ingest an AP mailbox over IMAP or a watched folder, extract India GST
+  fields with validations, match the invoice to a Zoho Books vendor and purchase
+  order through a read-only OAuth token, detect duplicate bills, and archive the
+  source. Creating the purchase bill, the remaining GST verification checks,
+  and the INR approval rules land with the write-path ticket. MailDesk,
+  LedgerLite, and the shared file tree remain the offline fixtures; payments are
+  scheduled, not transferred; no email is sent.
 - **Authentication, authorization, multi-tenancy, or cloud deployment.** The
   dashboard binds to localhost and has no login or tenant boundary.
 - **A queue, scheduler, or parallel execution.** One process runs one Request at

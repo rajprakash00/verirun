@@ -244,6 +244,7 @@ def parsed_invoice(normalized: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "invoice_date": normalized["invoice_date"]["value"],
         "total_paise": normalized["total_paise"]["value"],
         "currency": normalized["currency"]["value"],
+        "po_reference": normalized["po_reference"]["value"],
     }
 
 

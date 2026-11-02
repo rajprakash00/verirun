@@ -1,0 +1,21 @@
+{
+  "code": 0,
+  "message": "success",
+  "contact": {
+    "contact_id": "4600000000001",
+    "contact_name": "Paper Trail Supplies Pvt. Ltd.",
+    "company_name": "Paper Trail Supplies Pvt. Ltd.",
+    "contact_type": "vendor",
+    "gst_no": "29AABCV1234C1ZQ",
+    "email": "accounts@papertrail.example",
+    "billing_address": {
+      "address": "14 Market Road",
+      "city": "Bengaluru",
+      "state": "Karnataka",
+      "zip": "560001",
+      "country": "India"
+    },
+    "status": "active",
+    "created_time": "2026-09-01T09:00:00+0530"
+  }
+}

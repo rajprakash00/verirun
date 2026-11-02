@@ -23,6 +23,14 @@ from verirun.adapters.folder import WatchedFolderSource
 from verirun.adapters.imap import ImapSource
 from verirun.adapters.memory import InMemoryAccountingSystem
 from verirun.adapters.mock import MockAccountingSystem, MockMailSource
+from verirun.adapters.zoho import (
+    ZohoAccountingReads,
+    ZohoAccountingSystem,
+    ZohoBooksClient,
+    ZohoOAuthConfig,
+    ZohoTokenManager,
+    ZohoTokenStore,
+)
 
 __all__ = [
     "AccountingReads",
@@ -47,4 +55,10 @@ __all__ = [
     "UnsupportedError",
     "Vendor",
     "WatchedFolderSource",
+    "ZohoAccountingReads",
+    "ZohoAccountingSystem",
+    "ZohoBooksClient",
+    "ZohoOAuthConfig",
+    "ZohoTokenManager",
+    "ZohoTokenStore",
 ]

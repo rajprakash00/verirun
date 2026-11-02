@@ -11,13 +11,23 @@ from pathlib import Path
 from typing import Any
 
 from mocks.ledgerlite import db as ledgerlite
+from tests.india_fixture import GSTIN, INVOICE_NUMBER, PO_ID, SUPPLIER, TOTAL_PAISE
 from tests.support import ROOT, ScriptedClient, vision_fields
-from verirun.adapters import MockAccountingSystem
-from verirun.context.task_pack import TaskPack, load_task_pack
+from verirun.adapters import (
+    Bill,
+    InMemoryAccountingSystem,
+    MockAccountingSystem,
+    PurchaseOrder,
+    Vendor,
+)
+from verirun.context.task_pack import TaskPack, VerificationCheck, load_task_pack
+from verirun.engine.models import Observation
 from verirun.engine.states import RunState
 from verirun.engine.verify import verify_run
 from verirun.runs.store import RunStore
 from verirun.tools import ToolRegistry, build_erp_tools, build_file_tools
+
+CREATED_AT = "2026-09-01T09:00:00+00:00"
 
 INVOICE = {
     "number": "NW-2026-001",
@@ -640,3 +650,214 @@ def test_a_low_confidence_verifier_read_does_not_verify(
     results = {result.id: result for result in store.get_verification("RUN-0001")}
     assert not results["invoice-filed"].ok
     assert "below the confidence threshold" in results["invoice-filed"].detail
+
+
+INDIA_PARSED = {
+    "supplier_name": SUPPLIER,
+    "supplier_gstin": GSTIN,
+    "invoice_number": INVOICE_NUMBER,
+    "invoice_date": "2026-09-05",
+    "total_paise": TOTAL_PAISE,
+    "currency": "INR",
+    "po_reference": PO_ID,
+}
+
+
+def india_accounting(
+    *,
+    vendor_tax_id: str = GSTIN,
+    vendor_name: str = SUPPLIER,
+    po_amount_cents: int = TOTAL_PAISE,
+    bills: tuple[Bill, ...] = (),
+) -> InMemoryAccountingSystem:
+    return InMemoryAccountingSystem(
+        vendors=[
+            Vendor(
+                id="V-IN-1001",
+                name=vendor_name,
+                tax_id=vendor_tax_id,
+                email="accounts@papertrail.example",
+                address="14 Market Road, Bengaluru",
+                status="active",
+                created_at=CREATED_AT,
+            )
+        ],
+        purchase_orders=[
+            PurchaseOrder(
+                id=PO_ID,
+                number=PO_ID,
+                vendor_id="V-IN-1001",
+                amount_cents=po_amount_cents,
+                currency="INR",
+                status="open",
+                issued_at=CREATED_AT,
+            )
+        ],
+        bills=bills,
+    )
+
+
+def matching_pack(**params: Any) -> TaskPack:
+    return TaskPack(
+        id="zoho-match-test",
+        goal_template="Match the extracted invoice against the accounting system",
+        sop="india-gst-extraction",
+        tools=["invoice.extract"],
+        extraction={"confidence_threshold": 0.8},
+        verification=[
+            VerificationCheck(
+                id="accounting-invoice-matches",
+                description="The extracted invoice matches the vendor, PO, and is not a duplicate.",
+                check="accounting_invoice_matches",
+                params=params,
+            )
+        ],
+    )
+
+
+def seed_extraction(
+    store: RunStore,
+    *,
+    parsed: dict[str, Any] | None = None,
+    po_reference: str | None = PO_ID,
+    run_id: str = "RUN-0001",
+) -> None:
+    store.add_observation(
+        run_id,
+        Observation(
+            ok=True,
+            summary="Extracted the India GST invoice",
+            data={
+                "parsed": parsed or dict(INDIA_PARSED, po_reference=po_reference),
+                "fields": {"po_reference": {"value": po_reference}},
+            },
+        ),
+        tool="invoice.extract",
+    )
+
+
+def test_an_extracted_invoice_matches_the_read_only_accounting_records(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=india_accounting(),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.COMPLETED
+    result = store.get_verification("RUN-0001")[0]
+    assert result.ok
+    assert "accounting:vendor:V-IN-1001" in result.evidence
+    assert f"accounting:purchaseorder:{PO_ID}" in result.evidence
+    assert f"accounting:no-bill:V-IN-1001:{INVOICE_NUMBER}" in result.evidence
+
+
+def test_a_duplicate_invoice_fails_the_match(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+    existing = Bill(
+        id="INV-Z1",
+        number=INVOICE_NUMBER,
+        vendor_id="V-IN-1001",
+        po_id=PO_ID,
+        gr_id=None,
+        amount_cents=TOTAL_PAISE,
+        currency="INR",
+        status="approved",
+        received_at=CREATED_AT,
+    )
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=india_accounting(bills=(existing,)),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "INV-Z1" in result.detail
+    assert "already" in result.detail
+
+
+def test_a_vendor_gstin_mismatch_fails_the_match(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=india_accounting(vendor_tax_id="29AABCV1234C1Z9"),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "GSTIN" in result.detail
+
+
+def test_a_purchase_order_amount_mismatch_fails_the_match(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=india_accounting(po_amount_cents=TOTAL_PAISE - 100),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "purchase order" in result.detail
+
+
+def test_a_missing_purchase_order_fails_when_the_pack_requires_one(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store, po_reference=None)
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(require_purchase_order=True),
+        store,
+        accounting=india_accounting(),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.FAILED
+    assert "purchase order" in store.get_verification("RUN-0001")[0].detail
+
+
+def test_a_missing_purchase_order_is_allowed_by_default(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store, po_reference=None)
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=india_accounting(),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.COMPLETED

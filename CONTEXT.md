@@ -52,7 +52,14 @@ Shared vocabulary for this project. A glossary only. No implementation details.
 
 **Watched Folder Source** — a Mail Source that turns invoice PDFs dropped into a local directory into messages, without mailbox access.
 
-**Accounting System** — the system of record for vendors, purchase orders, and purchase bills. The Verifier reads it; the executor writes purchase bills to it. LedgerLite is an Accounting System; Zoho Books will be.
+**Accounting System** — the system of record for vendors, purchase orders, and purchase bills. The Verifier reads it; the executor writes purchase bills to it. LedgerLite is an Accounting System; Zoho Books India is the product one.
+
+**Zoho Books** — the product accounting system. Verirun reads vendors, purchase orders, bills, and payments from it through OAuth. The Verifier gets a read-only token; the write path creates purchase bills only after approval.
+
+**Read-Only Accounting Token** — a Zoho Books OAuth token whose scopes allow reads only. Verirun builds a separate `AccountingReads` object from it and gives it to the Verifier, never to the executor.
+
+**Purchase Order** — a buyer's commitment to a vendor for an amount. Verirun matches an invoice to one by its printed reference when the invoice cites it.
+
 
 **Purchase Bill** — the bill Verirun creates in the accounting system for a supplier invoice. LedgerLite calls it an invoice.
 

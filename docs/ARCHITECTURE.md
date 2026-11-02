@@ -50,8 +50,11 @@ The engine and the Verifier depend on adapters, never on a mock database.
 and pending-approval reads; the Verifier gets only this interface.
 `AccountingSystem` adds purchase-bill creation plus the Mock Suite's vendor
 creation and payment scheduling. The Mock Suite adapters, the in-memory fake,
-an IMAP source, and a watched-folder source implement them; Zoho Books will be
-the next accounting swap (ADR 0007, ADR 0008).
+an IMAP source, and a watched-folder source implement them. Zoho Books India is
+the product accounting swap: `ZohoAccountingReads` reads vendors, purchase
+orders, bills, and payments from a read-only OAuth token, and
+`ZohoAccountingSystem` adds the write half when the approval ticket lands
+(ADR 0007, ADR 0009).
 
 India GST invoices go through `invoice.extract`: the model returns every field
 with a confidence and an exact citation, and deterministic GSTIN and tax
@@ -178,6 +181,24 @@ task-specific logic; swapping the Task Pack swaps the task. Demonstrated with
   and records GSTIN and tax validations. Scans still use the US vision schema
   until the India Task Pack defines scan scenarios.
 
+### Product accounting source: Zoho Books India
+
+- `ZohoAccountingReads` reads contacts (vendors), purchase orders, bills, and
+  vendor payments over OAuth. The Verifier receives this interface with a
+  read-only refresh token; `ZohoAccountingSystem` adds the executor's write half
+  when the approval ticket lands.
+- The HTTP client walks every `page_context` page, retries 429 and 5xx with
+  backoff, honours `Retry-After`, refreshes the access token once on 401, and
+  maps 404 and Zoho code 1002 to `NotFoundError`.
+- The refresh and access tokens live in one Fernet-encrypted file with mode
+  `0600`. The operator supplies the encryption key; a wrong key fails with an
+  actionable error and never prints a token.
+- Bills are matched by exact vendor and invoice number after local filtering;
+  Zoho's search syntax is not the duplicate guarantee. `wait_for_bill` polls
+  the list endpoint for a newly created bill and times out as `NotFoundError`.
+- Zoho Books has no goods receipts; `get_goods_receipt` reports `NotFoundError`
+  instead of inventing one. The Mock Suite keeps the goods-receipt path.
+
 ## 6. Human-in-the-loop
 
 Approval Gates are declared per Task Pack. Irreversible actions (schedule payment above
@@ -191,6 +212,12 @@ The Verifier reads the Task Pack's verification contract and checks real state t
 read-only accounting adapter (`AccountingReads`) and the filesystem. It does not read the
 executor's messages and does not trust screenshots. Output: pass/fail per criterion with
 evidence references. Screenshots are display evidence only.
+
+The India pack's `accounting_invoice_matches` check resolves each extracted invoice
+against the read-only accounting client: one vendor whose GSTIN and name agree, no
+bill with the same vendor and number, and, when the source cites a purchase order,
+one order whose amount and currency agree. Evidence references are system ids such as
+`accounting:vendor:<id>` and `accounting:purchaseorder:<id>`.
 
 The eval harness has two eval-only switches that the product paths leave at their defaults.
 Disabling the Verifier accepts the executor's outcome without a verification pass and writes

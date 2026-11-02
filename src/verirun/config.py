@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     imap_folder: str = "INBOX"
     imap_ssl: bool = True
     watch_dir: Path | None = None
+    zoho_organization_id: str = ""
+    zoho_client_id: str = ""
+    zoho_client_secret: SecretStr = SecretStr("")
+    zoho_read_refresh_token: SecretStr = SecretStr("")
+    zoho_read_token_file: Path = Path("runs/zoho-read-token.enc")
+    zoho_token_key: SecretStr = SecretStr("")
+    zoho_api_base_url: str = "https://www.zohoapis.in/books/v3"
+    zoho_accounts_domain: str = "https://accounts.zoho.in"
+    zoho_timeout_s: float = 30.0
     max_steps: int = DEFAULT_MAX_STEPS
     max_cost_usd: float = DEFAULT_MAX_COST_USD
     request_timeout_s: float = 600.0

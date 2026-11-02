@@ -152,10 +152,16 @@ class PurchaseOrder:
     currency: str
     status: str
     issued_at: str
+    number: str = ""
     scenario: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        # Keep the observation shape the recorded replay fixtures already use;
+        # a product adapter that has a human-readable number adds it.
+        if not data["number"]:
+            data.pop("number")
+        return data
 
 
 @dataclass(frozen=True)

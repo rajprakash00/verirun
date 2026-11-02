@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "message": "success",
+  "purchaseorder": {
+    "purchaseorder_id": "4600000000101",
+    "purchaseorder_number": "PO-IN-2001",
+    "vendor_id": "4600000000001",
+    "vendor_name": "Paper Trail Supplies Pvt. Ltd.",
+    "total": "11800.00",
+    "currency_code": "INR",
+    "status": "open",
+    "billed_status": "unbilled",
+    "date": "2026-09-01"
+  }
+}
