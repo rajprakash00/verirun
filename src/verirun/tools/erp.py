@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, ClassVar
 
 from verirun.adapters import AccountingSystem, AdapterError
-from verirun.engine.models import Observation
+from verirun.engine.models import IDEMPOTENCY_KEY_ARG, Observation
 from verirun.tools.base import Tool, ToolError, optional_str, require_str
 
 
@@ -246,7 +246,8 @@ class FileInvoiceTool(ErpTool):
         "and goods receipt. Amount is in US dollars."
     )
     side_effect = True
-    action = "invoice.file"
+    irreversible = True
+    action = "bill.create"
     parameters: ClassVar[dict[str, Any]] = {
         "type": "object",
         "properties": {
@@ -264,13 +265,41 @@ class FileInvoiceTool(ErpTool):
         "additionalProperties": False,
     }
 
+    def __init__(self, accounting: AccountingSystem, *, default_currency: str = "USD") -> None:
+        super().__init__(accounting)
+        self.default_currency = default_currency
+        if default_currency != "USD":
+            # The Mock Suite path keeps the original wording and its recorded
+            # replay fixtures; the product path names its own currency.
+            self.description = (
+                "File a validated invoice in Zoho Books against its vendor and "
+                f"purchase order. The amount is in {default_currency}."
+            )
+            self.parameters = {
+                **self.parameters,
+                "properties": {
+                    **self.parameters["properties"],
+                    "amount": {
+                        "type": "number",
+                        "description": (
+                            f"Invoice total in {default_currency}, "
+                            "for example 11800.00."
+                        ),
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": f"Currency code. Defaults to {default_currency}.",
+                    },
+                },
+            }
+
     def run(self, args: dict[str, Any]) -> Observation:
         number = require_str(args, "number")
         vendor_id = require_str(args, "vendor_id")
         amount_cents = parse_amount(args.get("amount"))
         po_id = optional_str(args, "po_id")
         gr_id = optional_str(args, "gr_id")
-        currency = optional_str(args, "currency", "USD") or "USD"
+        currency = optional_str(args, "currency", self.default_currency) or self.default_currency
         bill = self.adapter_call(
             self.accounting.create_purchase_bill,
             number=number,
@@ -279,6 +308,7 @@ class FileInvoiceTool(ErpTool):
             currency=currency,
             po_id=po_id,
             gr_id=gr_id,
+            idempotency_key=optional_str(args, IDEMPOTENCY_KEY_ARG),
         )
         return Observation(
             ok=True,
@@ -297,6 +327,43 @@ class FileInvoiceTool(ErpTool):
                 "status": bill.status,
             },
         )
+
+    def policy_facts(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The facts the approval rules read before a purchase bill is created.
+
+        The vendor lookup is a read, and its answer decides whether this bill is
+        against a matched vendor or needs a human for a new one. The extraction
+        and purchase-order requirements arrive from the Run facts merged by the
+        policy gate.
+        """
+        vendor_id = args.get("vendor_id")
+        vendor_matched = False
+        vendor_status = "unmatched"
+        if isinstance(vendor_id, str) and vendor_id:
+            try:
+                vendor = self.accounting.get_vendor(vendor_id)
+            except AdapterError:
+                pass
+            else:
+                vendor_matched = True
+                vendor_status = vendor.status
+        amount_cents = 0
+        raw_amount = args.get("amount")
+        if raw_amount is not None:
+            try:
+                amount_cents = parse_amount(raw_amount)
+            except ToolError:
+                pass
+        po_id = args.get("po_id")
+        return {
+            "system": self.accounting.policy_system,
+            "vendor_id": vendor_id,
+            "vendor_matched": vendor_matched,
+            "vendor_status": vendor_status,
+            "amount_inr": amount_cents / 100,
+            "currency": args.get("currency") or self.default_currency,
+            "purchase_order_present": isinstance(po_id, str) and bool(po_id),
+        }
 
 
 class SchedulePaymentTool(ErpTool):
@@ -389,7 +456,9 @@ class SchedulePaymentTool(ErpTool):
         }
 
 
-def build_erp_tools(accounting: AccountingSystem) -> list[Tool]:
+def build_erp_tools(
+    accounting: AccountingSystem, *, default_currency: str = "USD"
+) -> list[Tool]:
     """The ERP tools, all bound to one accounting system."""
     return [
         ListVendorsTool(accounting),
@@ -400,6 +469,6 @@ def build_erp_tools(accounting: AccountingSystem) -> list[Tool]:
         ListInvoicesTool(accounting),
         GetInvoiceTool(accounting),
         CreateVendorTool(accounting),
-        FileInvoiceTool(accounting),
+        FileInvoiceTool(accounting, default_currency=default_currency),
         SchedulePaymentTool(accounting),
     ]

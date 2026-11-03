@@ -1,0 +1,109 @@
+{% set request = item.request %}
+<div class="card">
+  <h2>{{ request.tool }} <span class="state state-awaiting_approval">pending</span></h2>
+  <p>{{ request.reason }}</p>
+  <p class="muted">
+    Run <a href="/runs/{{ request.run_id }}"><code>{{ request.run_id }}</code></a> ·
+    step <code>{{ request.step_id }}</code>
+    {% if request.policy %} · policy <code>{{ request.policy }}</code>{% endif %}
+    {% if request.rule %} · rule <code>{{ request.rule }}</code>{% endif %}
+    · requested {{ request.created_at.strftime("%Y-%m-%d %H:%M:%S") }}
+  </p>
+
+  {% if item.source %}
+  <h3>Source invoice</h3>
+  <p>
+    <strong>{{ item.source.subject }}</strong>
+    <span class="muted">from {{ item.source.sender }} &lt;{{ item.source.sender_email }}&gt;</span>
+  </p>
+  {% if item.source.attachments %}
+  <ul>
+    {% for attachment in item.source.attachments %}
+    <li><code>{{ attachment.filename }}</code> <span class="muted">{{ attachment.path }}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% endif %}
+
+  {% if item.extraction %}
+  {% set fields = item.extraction.fields or {} %}
+  <h3>Extraction</h3>
+  <p class="muted">
+    source <code>{{ item.extraction.path }}</code>
+    {% if item.extraction.min_confidence is not none %}
+    · lowest confidence {{ "%.2f"|format(item.extraction.min_confidence) }}
+    {% endif %}
+    {% if item.extraction.threshold is not none %}
+    · threshold {{ "%.2f"|format(item.extraction.threshold) }}
+    {% endif %}
+    {% if item.extraction.low_confidence %}· <strong>below the threshold</strong>{% endif %}
+  </p>
+  <table>
+    <tbody>
+      {% for name, label in [
+        ("supplier_name", "Supplier"),
+        ("supplier_gstin", "GSTIN"),
+        ("invoice_number", "Invoice number"),
+        ("invoice_date", "Invoice date"),
+        ("taxable_amount_paise", "Taxable amount"),
+        ("cgst_paise", "CGST"),
+        ("sgst_paise", "SGST"),
+        ("igst_paise", "IGST"),
+        ("total_paise", "Total"),
+        ("currency", "Currency"),
+        ("po_reference", "Purchase order"),
+      ] %}
+      {% if fields.get(name) and fields[name].value is not none %}
+      <tr>
+        <th>{{ label }}</th>
+        <td>
+          {% if name.endswith("_paise") %}
+          {{ "%.2f"|format(fields[name].value / 100) }} INR
+          {% else %}
+          {{ fields[name].value }}
+          {% endif %}
+          <span class="muted">confidence {{ "%.2f"|format(fields[name].confidence) }}
+            {% if fields[name].citation %}· “{{ fields[name].citation }}”{% endif %}
+          </span>
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if item.validations %}
+  <h3>GST validations</h3>
+  <ul>
+    {% for validation in item.validations %}
+    <li>
+      <span class="badge {{ 'ok' if validation.ok else 'bad' }}">{{ 'pass' if validation.ok else 'FAIL' }}</span>
+      <code>{{ validation.id }}</code> — {{ validation.detail }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h3>Proposed purchase bill</h3>
+  <table>
+    <tbody>
+      <tr><th>Invoice number</th><td>{{ request.arguments.get("number") }}</td></tr>
+      <tr><th>Vendor</th><td>{{ request.arguments.get("vendor_id") }}</td></tr>
+      <tr><th>Amount</th><td>{{ request.arguments.get("amount") }} {{ request.arguments.get("currency") or "INR" }}</td></tr>
+      {% if request.arguments.get("po_id") %}
+      <tr><th>Purchase order</th><td>{{ request.arguments.get("po_id") }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+  <p class="muted">Action <code>{{ request.action }}</code> with arguments <code>{{ request.arguments | tojson }}</code></p>
+  <div class="actions">
+    <form method="post" action="/approvals/{{ request.id }}/approve">
+      <button type="submit">Approve</button>
+    </form>
+    <form method="post" action="/approvals/{{ request.id }}/reject">
+      <input type="text" name="reason" placeholder="Reason for rejection" required>
+      <button type="submit" class="reject">Reject</button>
+    </form>
+  </div>
+</div>

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from verirun.context.policies import PolicyDecision
-from verirun.engine.models import ErrorKind, Observation
+from verirun.engine.models import IDEMPOTENCY_KEY_ARG, ErrorKind, Observation
 from verirun.tools.base import Tool
 from verirun.tools.gate import PolicyGate
 
@@ -84,6 +84,13 @@ class ToolRegistry:
 
     def invoke(self, name: str, args: dict[str, Any] | None = None) -> Observation:
         arguments = dict(args or {})
+        # The engine's idempotency key is for the adapter, not for the model's
+        # Observation history or the Evidence Pack.
+        visible = {
+            key: value
+            for key, value in arguments.items()
+            if key != IDEMPOTENCY_KEY_ARG
+        }
         if name not in self._allowlist:
             allowed = ", ".join(self._allowlist) or "(none)"
             return _failure(
@@ -104,5 +111,5 @@ class ToolRegistry:
                     name, f"policy evaluation for {name} failed: {exc}", "unknown"
                 )
             if decision.outcome != "allow":
-                return _policy_observation(decision, tool, arguments)
+                return _policy_observation(decision, tool, visible)
         return tool.invoke(arguments)

@@ -30,6 +30,8 @@ from verirun.adapters.matching import gstin_key, name_key, reference_key
 from verirun.context.task_pack import INVOICE_EXTRACT_TOOL, TaskPack
 from verirun.engine.models import CheckResult
 from verirun.engine.states import RunState
+from verirun.india.source import find_source_invoice
+from verirun.india.validation import validate_gstin, validate_tax
 from verirun.llm.client import LLMClient
 from verirun.runs.models import JournalEntry, Run
 from verirun.runs.store import RunStore
@@ -98,6 +100,21 @@ def _invoice_for_claim(
             f"{number} for {vendor_id}, expected one"
         )
     return bills[0], None
+
+
+def _claimed_bill_id(
+    context: VerificationContext, *, number: str, vendor_id: str
+) -> str | None:
+    """The bill id this Run's own completed write names, if any."""
+    for entry in _claims(context, "erp.file_invoice"):
+        payload = entry.payload or {}
+        if payload.get("number") != number or payload.get("vendor_id") != vendor_id:
+            continue
+        data = (entry.result or {}).get("data") or {}
+        invoice_id = data.get("invoice_id")
+        if isinstance(invoice_id, str) and invoice_id:
+            return invoice_id
+    return None
 
 
 def _bills(context: VerificationContext, **filters: str) -> list[Bill]:
@@ -423,12 +440,18 @@ def check_accounting_invoice_matches(
             if bill.status in LIVE_BILL_STATUSES
         ]
         if existing:
-            evidence.append(f"accounting:bill:{existing[0].id}")
-            failures.append(
-                f"{number}: {context.accounting.display_name} already has a bill "
-                f"for vendor {vendor.id} as {existing[0].id}"
+            claimed = _claimed_bill_id(
+                context, number=number, vendor_id=vendor.id
             )
-            continue
+            if len(existing) != 1 or existing[0].id != claimed:
+                evidence.append(f"accounting:bill:{existing[0].id}")
+                failures.append(
+                    f"{number}: {context.accounting.display_name} already has a bill "
+                    f"for vendor {vendor.id} as {existing[0].id}"
+                )
+                continue
+            # This Run created the bill being verified; it is not a duplicate.
+            evidence.append(f"accounting:bill:{existing[0].id}")
         purchase_order = _po_reference(data)
         if purchase_order is not None:
             orders = [
@@ -479,6 +502,159 @@ def check_accounting_invoice_matches(
         f"{context.accounting.display_name} purchase-order records",
         tuple(evidence),
     )
+
+
+def check_india_bill_matches(
+    params: dict[str, Any], context: VerificationContext
+) -> CheckOutcome:
+    """Each purchase bill exists exactly once and matches its source tax invoice.
+
+    The source is parsed by the Verifier itself. The check covers the bill's
+    existence, vendor identity and GSTIN, invoice number, amount, the GSTIN
+    check digit and tax arithmetic, the purchase order when the bill cites one,
+    and the source document reference.
+    """
+    claims = _claims(context, "erp.file_invoice")
+    if not claims:
+        return CheckOutcome(
+            False, "no successful erp.file_invoice action is recorded on this Run"
+        )
+    failures: list[str] = []
+    evidence: list[str] = []
+    for entry in claims:
+        invoice, problem = _invoice_for_claim(context, entry)
+        if problem is not None:
+            failures.append(problem)
+            continue
+        assert invoice is not None
+        if invoice.status not in LIVE_BILL_STATUSES:
+            failures.append(
+                f"{invoice.id}: status '{invoice.status}' is not a live purchase bill"
+            )
+            continue
+        source = find_source_invoice(context.shared_root, invoice.number)
+        if source is None:
+            failures.append(
+                f"{invoice.id}: no source invoice for number {invoice.number} "
+                "could be read in the shared tree"
+            )
+            continue
+        path, parsed = source
+        reference = path.relative_to(context.shared_root).as_posix()
+        before = len(failures)
+        if reference_key(parsed.invoice_number) != reference_key(invoice.number):
+            failures.append(
+                f"{invoice.id}: {context.accounting.display_name} number "
+                f"{invoice.number} != source {parsed.invoice_number}"
+            )
+        if parsed.currency.upper() != invoice.currency.upper():
+            failures.append(
+                f"{invoice.id}: bill currency {invoice.currency} != source "
+                f"{parsed.currency}"
+            )
+        if parsed.total_paise != invoice.amount_cents:
+            failures.append(
+                f"{invoice.id}: {context.accounting.display_name} amount "
+                f"{invoice.amount_cents / 100:,.2f} != source total "
+                f"{parsed.total_paise / 100:,.2f} {parsed.currency}"
+            )
+        try:
+            vendor = context.accounting.get_vendor(invoice.vendor_id)
+        except NotFoundError:
+            failures.append(
+                f"{invoice.id}: vendor {invoice.vendor_id} is missing from "
+                f"{context.accounting.display_name}"
+            )
+            vendor = None
+        if vendor is not None:
+            if gstin_key(vendor.tax_id) != gstin_key(parsed.supplier_gstin):
+                failures.append(
+                    f"{invoice.id}: vendor GSTIN {vendor.tax_id!r} != source "
+                    f"{parsed.supplier_gstin!r}"
+                )
+            if name_key(vendor.name) != name_key(parsed.supplier_name):
+                failures.append(
+                    f"{invoice.id}: vendor name {vendor.name!r} != source "
+                    f"{parsed.supplier_name!r}"
+                )
+        gstin = validate_gstin(parsed.supplier_gstin)
+        if not gstin.ok:
+            failures.append(f"{invoice.id}: {gstin.detail}")
+        taxes = validate_tax(
+            taxable_paise=parsed.taxable_paise,
+            cgst_paise=parsed.cgst_paise,
+            sgst_paise=parsed.sgst_paise,
+            igst_paise=parsed.igst_paise,
+            total_paise=parsed.total_paise,
+        )
+        for tax in taxes:
+            if not tax.ok:
+                failures.append(f"{invoice.id}: {tax.detail}")
+        failures.extend(
+            _india_reference_failures(context, invoice, parsed.po_reference)
+        )
+        if len(failures) == before:
+            evidence.extend(
+                [
+                    f"erp:{invoice.id}",
+                    f"source:{reference}",
+                    f"gstin:{parsed.supplier_gstin}",
+                    "tax:tax_sum",
+                    "tax:tax_split",
+                ]
+            )
+            if invoice.po_id:
+                evidence.append(f"accounting:purchaseorder:{invoice.po_id}")
+    if failures:
+        return CheckOutcome(False, "; ".join(failures), tuple(evidence))
+    return CheckOutcome(
+        True,
+        f"{len(claims)} purchase bill(s) exist exactly once and agree with their "
+        "source tax invoice and GST validations",
+        tuple(evidence),
+    )
+
+
+def _india_reference_failures(
+    context: VerificationContext, invoice: Bill, source_reference: str | None
+) -> list[str]:
+    """A Zoho purchase bill must agree with the source and cited purchase order."""
+    if source_reference and not invoice.po_id:
+        return [
+            (
+                f"{invoice.id}: source cites purchase order {source_reference} "
+                "but the bill has none"
+            )
+        ]
+    if not invoice.po_id:
+        return []
+    order = _purchase_order(context, invoice.po_id)
+    if order is None:
+        return [f"{invoice.id}: purchase order {invoice.po_id} is missing"]
+    failures: list[str] = []
+    if source_reference and reference_key(source_reference) not in {
+        reference_key(order.number or order.id),
+        reference_key(order.id),
+    }:
+        failures.append(
+            f"{invoice.id}: bill cites purchase order {invoice.po_id} but the "
+            f"source cites {source_reference}"
+        )
+    if order.vendor_id != invoice.vendor_id:
+        failures.append(
+            f"{invoice.id}: purchase order {invoice.po_id} belongs to another vendor"
+        )
+    if order.amount_cents != invoice.amount_cents:
+        failures.append(
+            f"{invoice.id}: amount {invoice.amount_cents / 100:,.2f} does not match "
+            f"purchase order {invoice.po_id}"
+        )
+    if order.currency.upper() != invoice.currency.upper():
+        failures.append(
+            f"{invoice.id}: currency {invoice.currency} does not match purchase "
+            f"order {invoice.po_id} ({order.currency})"
+        )
+    return failures
 
 
 def _po_reference(data: dict[str, Any]) -> str | None:
@@ -661,6 +837,7 @@ CHECKS: dict[str, CheckFunction] = {
     "erp_payment_state": check_erp_payment_state,
     "erp_vendor_matches": check_erp_vendor_matches,
     "file_archived": check_file_archived,
+    "india_bill_matches": check_india_bill_matches,
 }
 
 

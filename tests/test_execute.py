@@ -68,7 +68,9 @@ class InvoiceTool(Tool):
         self.calls: list[dict[str, Any]] = []
 
     def run(self, args: dict[str, Any]) -> Observation:
-        self.calls.append(dict(args))
+        self.calls.append(
+            {key: value for key, value in args.items() if key != "_idempotency_key"}
+        )
         return Observation(
             ok=True,
             summary=f"Filed {args['invoice_id']}",

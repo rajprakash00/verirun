@@ -42,6 +42,45 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
     store = RunStore(settings.run_db)
     make_client = client_factory or (lambda run_id: build_client(settings, session_id=run_id))
 
+    def approval_review(approval: Any) -> dict[str, Any]:
+        """The facts an approver needs: source, extraction, validations, bill.
+
+        They come from the Run's own observations and the prepared arguments,
+        so the queue shows the same evidence the Run will keep.
+        """
+        observations = store.list_observations(approval.run_id)
+        number = approval.arguments.get("number")
+        extractions = [
+            item for item in observations if item.tool == "invoice.extract"
+        ]
+        chosen = None
+        if isinstance(number, str) and number:
+            for item in reversed(extractions):
+                parsed = item.data.get("parsed") or {}
+                if parsed.get("invoice_number") == number:
+                    chosen = item
+                    break
+        if chosen is None and extractions:
+            chosen = extractions[-1]
+        extraction = chosen.data if chosen is not None else None
+        source_path = (extraction or {}).get("path")
+        source = None
+        for item in reversed(observations):
+            if item.tool != "mail.read" or not item.ok:
+                continue
+            attachments = item.data.get("attachments") or []
+            if source_path is None or any(
+                attachment.get("path") == source_path for attachment in attachments
+            ):
+                source = item.data
+                break
+        return {
+            "request": approval,
+            "source": source,
+            "extraction": extraction,
+            "validations": list((extraction or {}).get("validations") or []),
+        }
+
     def detail(run_id: str) -> dict[str, Any]:
         try:
             run = store.get_run(run_id)
@@ -49,6 +88,7 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         steps = store.get_steps(run_id)
         states = store.get_step_states(run_id)
+        approvals = store.list_approvals(run_id)
         return {
             "run": run,
             "steps": [
@@ -60,7 +100,12 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
                 for index, step in enumerate(steps)
             ],
             "observations": store.list_observations(run_id),
-            "approvals": store.list_approvals(run_id),
+            "approvals": approvals,
+            "pending_reviews": [
+                approval_review(request)
+                for request in approvals
+                if request.status == "pending"
+            ],
             "escalations": store.list_escalations(run_id),
             "verification": store.get_verification(run_id),
             "evidence_path": settings.run_db.parent / run_id / "evidence.json",
@@ -119,8 +164,11 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
 
     @app.get("/approvals", response_class=HTMLResponse)
     def approvals_page(request: Request) -> Any:
+        pending = store.list_pending_approvals()
         return templates.TemplateResponse(
-            request, "approvals.html", {"approvals": store.list_pending_approvals()}
+            request,
+            "approvals.html",
+            {"approvals": [approval_review(item) for item in pending]},
         )
 
     @app.post("/approvals/{approval_id}/approve")

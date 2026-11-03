@@ -3,9 +3,10 @@
 The tool reads a text-layer PDF, asks the reasoning model for every GST field
 with a confidence and an exact citation, refuses citations that are not in the
 document, and runs the deterministic GSTIN and tax validations. A field below
-the Task Pack's confidence threshold fails the call; a failed validation does
-not, because the extraction succeeded and the Evidence Pack must show the
-verdict.
+the Task Pack's confidence threshold is recorded on the Observation and left
+for the bill's Approval Gate to catch, because a human decision is the point of
+the threshold; a failed validation does not fail the call either, because the
+Evidence Pack must show the verdict.
 """
 
 from __future__ import annotations
@@ -168,16 +169,8 @@ class ExtractIndiaInvoiceTool(FileTool):
                 data={**data, "citation_problems": problems},
             )
         low = low_confidence_fields(fields, self.confidence_threshold)
-        if low:
-            details = ", ".join(
-                f"{name} ({raw[name]['confidence']:.2f})" for name in low
-            )
-            raise ToolError(
-                "invalid",
-                "the extraction has fields below the confidence threshold "
-                f"{self.confidence_threshold:.2f}: {details}",
-                data={**data, "low_confidence": True, "low_confidence_fields": low},
-            )
+        data["low_confidence"] = bool(low)
+        data["low_confidence_fields"] = low
         extracted = sum(
             1
             for name in FIELD_ORDER
@@ -188,6 +181,14 @@ class ExtractIndiaInvoiceTool(FileTool):
             f"Extracted {extracted} field(s) from '{self.relative(path)}' with "
             f"citations (lowest confidence {data['min_confidence']:.2f})"
         )
+        if low:
+            details = ", ".join(
+                f"{name} ({raw[name]['confidence']:.2f})" for name in low
+            )
+            summary += (
+                f"; below the confidence threshold {self.confidence_threshold:.2f}: "
+                f"{details}"
+            )
         if failed:
             summary += f"; {len(failed)} GST validation(s) failed"
         return Observation(ok=True, summary=summary, data=data)

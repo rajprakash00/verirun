@@ -18,6 +18,7 @@ from verirun.adapters.base import (
     TransientError,
     UnsupportedError,
     Vendor,
+    WriteOutcomeUnknownError,
 )
 from verirun.adapters.folder import WatchedFolderSource
 from verirun.adapters.imap import ImapSource
@@ -55,6 +56,7 @@ __all__ = [
     "UnsupportedError",
     "Vendor",
     "WatchedFolderSource",
+    "WriteOutcomeUnknownError",
     "ZohoAccountingReads",
     "ZohoAccountingSystem",
     "ZohoBooksClient",

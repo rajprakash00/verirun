@@ -170,6 +170,107 @@ def test_invalid_effect_is_rejected() -> None:
         PolicyRule(id="x", description="x", effect="maybe")
 
 
+def test_subset_keeps_only_the_task_pack_policies() -> None:
+    subset = POLICIES.subset(["action-rules"])
+
+    assert subset.ids() == ["action-rules"]
+    assert subset.evaluate(
+        "payment.schedule",
+        {"amount_usd": 999999, "vendor_status": "active", "system": "ledgerlite"},
+    ).outcome == "allow"
+    with pytest.raises(PolicyEvaluationError, match="unknown policies"):
+        POLICIES.subset(["nope"])
+
+
+BILL_FACTS = {
+    "bill_amount_inr": 100,
+    "amount_matches_extraction": True,
+    "vendor_identity_matches": True,
+    "vendor_status": "active",
+    "purchase_order_required": True,
+    "purchase_order_present": True,
+    "purchase_order_matches_extraction": True,
+    "extraction_below_threshold": False,
+    "system": "zoho_books",
+}
+
+
+@pytest.mark.parametrize(
+    ("facts", "outcome", "rule_id"),
+    [
+        pytest.param(BILL_FACTS, "allow", None, id="matched-low-value"),
+        pytest.param(
+            {**BILL_FACTS, "bill_amount_inr": 10000.01},
+            "require_approval",
+            "bill-approval-threshold",
+            id="above-threshold",
+        ),
+        pytest.param(
+            {**BILL_FACTS, "amount_matches_extraction": False},
+            "require_approval",
+            "bill-amount-differs-from-extraction",
+            id="amount-differs",
+        ),
+        pytest.param(
+            {**BILL_FACTS, "vendor_identity_matches": False},
+            "require_approval",
+            "bill-vendor-differs-from-extraction",
+            id="vendor-differs",
+        ),
+        pytest.param(
+            {**BILL_FACTS, "purchase_order_matches_extraction": False},
+            "require_approval",
+            "bill-purchase-order-differs-from-extraction",
+            id="purchase-order-differs",
+        ),
+        pytest.param(
+            {**BILL_FACTS, "purchase_order_present": False},
+            "require_approval",
+            "missing-purchase-order-needs-approval",
+            id="missing-required-purchase-order",
+        ),
+        pytest.param(
+            {
+                **BILL_FACTS,
+                "purchase_order_required": False,
+                "purchase_order_present": False,
+                "purchase_order_matches_extraction": None,
+            },
+            "allow",
+            None,
+            id="purchase-order-not-required",
+        ),
+        pytest.param(
+            {**BILL_FACTS, "extraction_below_threshold": True},
+            "require_approval",
+            "low-confidence-extraction-needs-approval",
+            id="low-confidence",
+        ),
+        pytest.param(
+            {**BILL_FACTS, "vendor_status": "inactive"},
+            "forbid",
+            "no-bill-for-inactive-vendor",
+            id="inactive-vendor-is-denied",
+        ),
+    ],
+)
+def test_the_india_ap_policy_gates_bill_creation(
+    facts: dict, outcome: str, rule_id: str | None
+) -> None:
+    from pathlib import Path
+
+    from verirun.context.company import load_company_context
+
+    root = Path(__file__).resolve().parents[1]
+    context = load_company_context(root / "company")
+    india = context.policies.subset(["india-ap"])
+
+    decision = india.evaluate("bill.create", facts)
+
+    assert decision.outcome == outcome
+    assert decision.rule == rule_id
+
+
 def test_all_condition_operators() -> None:
     facts = {"n": 5, "name": "alpha", "tags": ["a", "b"]}
     cases = [

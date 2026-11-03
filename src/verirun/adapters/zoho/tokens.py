@@ -162,7 +162,7 @@ class ZohoTokenManager:
         if not refresh_token:
             raise ConflictError(
                 "Zoho OAuth has no refresh token; set "
-                "VERIRUN_ZOHO_READ_REFRESH_TOKEN or complete the OAuth flow"
+                f"{self._refresh_token_env} or complete the OAuth flow"
             )
         token = self._refresh(refresh_token)
         self.store.save(token)
@@ -182,7 +182,7 @@ class ZohoTokenManager:
             raise ConflictError(
                 f"Zoho OAuth did not return an access token: {error}. "
                 "Check VERIRUN_ZOHO_CLIENT_ID, VERIRUN_ZOHO_CLIENT_SECRET, and "
-                "VERIRUN_ZOHO_READ_REFRESH_TOKEN."
+                f"{self._refresh_token_env}."
             )
         try:
             expires_in = int(
@@ -242,9 +242,15 @@ class ZohoTokenManager:
             raise ConflictError(
                 f"Zoho OAuth rejected the refresh token: {error}. "
                 "Check VERIRUN_ZOHO_CLIENT_ID, VERIRUN_ZOHO_CLIENT_SECRET, and "
-                "VERIRUN_ZOHO_READ_REFRESH_TOKEN."
+                f"{self._refresh_token_env}."
             )
         raise TransientError(last_error)
+
+    @property
+    def _refresh_token_env(self) -> str:
+        if self.config.read_only:
+            return "VERIRUN_ZOHO_READ_REFRESH_TOKEN"
+        return "VERIRUN_ZOHO_WRITE_REFRESH_TOKEN"
 
 
 def _fernet(key: str) -> Fernet:

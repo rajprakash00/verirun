@@ -1,16 +1,18 @@
-"""The Zoho Books accounting adapter: reads for matching and verification.
+"""The Zoho Books accounting adapter: reads plus purchase-bill creation.
 
 Zoho Books is the product system of record. The Verifier gets
 ``ZohoAccountingReads`` with a read-only token; the executor gets
-``ZohoAccountingSystem``, whose write path lands with the approval ticket. The
-adapter normalises Zoho's vocabulary and money strings to the models the engine
-already uses, so a Zoho Run and a Mock Suite Run behave the same way.
+``ZohoAccountingSystem`` with a separate write token. The adapter normalises
+Zoho's vocabulary and money strings to the models the engine already uses, so a
+Zoho Run and a Mock Suite Run behave the same way. The write records the Run's
+idempotency key in the bill's reference number and reconciles before retrying.
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -25,10 +27,11 @@ from verirun.adapters.base import (
     NotFoundError,
     Payment,
     PurchaseOrder,
-    UnsupportedError,
     Vendor,
+    WriteOutcomeUnknownError,
 )
 from verirun.adapters.matching import gstin_key, name_key
+from verirun.adapters.rules import duplicate_bill_error, require_positive_amount
 from verirun.adapters.zoho.client import ZohoBooksClient
 
 BILL_STATUSES = {
@@ -204,15 +207,27 @@ class ZohoAccountingReads(AccountingReads):
 
 
 class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
-    """The executor's Zoho Books handle.
+    """The executor's Zoho Books handle: reads plus purchase-bill creation.
 
-    The read half is complete. The write half arrives with the approval and
-    write ticket; until then a write is an explicit ``UnsupportedError`` rather
-    than a silent local change.
+    Zoho Books has no idempotency header, so the adapter records the Run's key
+    in the bill's reference number and reconciles by (vendor, invoice number)
+    before it repeats a write. A bill that exists without this Run's key is a
+    duplicate, never adopted silently. An unknown write outcome is reconciled
+    once and then raised for a human; it is never retried blindly.
     """
 
-    def __init__(self, reads: ZohoAccountingReads) -> None:
-        super().__init__(reads.client)
+    def __init__(
+        self,
+        reads: ZohoAccountingReads,
+        *,
+        sleep: Callable[[float], None] | None = None,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        super().__init__(
+            reads.client,
+            sleep=sleep or reads._sleep,
+            clock=clock or reads._clock,
+        )
 
     def create_purchase_bill(
         self,
@@ -223,10 +238,89 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
         currency: str = "USD",
         po_id: str | None = None,
         gr_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Bill:
-        raise UnsupportedError(
-            "Zoho Books purchase-bill creation lands with the write-path ticket"
-        )
+        require_positive_amount(amount_cents)
+        if gr_id:
+            raise ConflictError(
+                "Zoho Books has no goods receipts; a bill cannot reference one"
+            )
+        self.get_vendor(vendor_id)
+        marker = _reference_marker(idempotency_key)
+        duplicate = self._existing_bill(number=number, vendor_id=vendor_id)
+        if duplicate is not None:
+            if marker and duplicate.reference == marker:
+                return duplicate
+            raise duplicate_bill_error(
+                number=number,
+                vendor_id=vendor_id,
+                existing_id=duplicate.id,
+                existing_status=duplicate.status,
+            )
+        body: dict[str, Any] = {
+            "vendor_id": vendor_id,
+            "bill_number": number,
+            "date": datetime.now(UTC).date().isoformat(),
+            "currency_code": currency,
+            "line_items": [
+                {
+                    "name": f"Invoice {number}",
+                    "rate": amount_cents / 100,
+                    "quantity": 1,
+                }
+            ],
+        }
+        if po_id:
+            body["purchaseorder_ids"] = [po_id]
+        if marker:
+            body["reference_number"] = marker
+        try:
+            payload = self.client.post("/bills", body)
+        except WriteOutcomeUnknownError:
+            # A read that fails during reconciliation must not turn an unknown
+            # write into a retry: escalate the original outcome instead.
+            try:
+                reconciled = self._reconcile(
+                    number=number, vendor_id=vendor_id, marker=marker
+                )
+            except AdapterError:
+                reconciled = None
+            if reconciled is not None:
+                return reconciled
+            raise
+        bill = payload.get("bill")
+        if not isinstance(bill, dict):
+            raise ConflictError("Zoho Books returned no bill after the write")
+        created = _bill(bill)
+        try:
+            return self.wait_for_bill(number=number, vendor_id=vendor_id)
+        except NotFoundError:
+            # The create response is the authoritative record; a list endpoint
+            # that has not caught up must not turn a completed write into a
+            # retry.
+            return created
+
+    def _existing_bill(self, *, number: str, vendor_id: str) -> Bill | None:
+        bills = self.list_bills(number=number, vendor_id=vendor_id)
+        if len(bills) > 1:
+            raise ConflictError(
+                f"Zoho Books returned {len(bills)} bills numbered {number} for "
+                f"vendor {vendor_id}, expected at most one"
+            )
+        return bills[0] if bills else None
+
+    def _reconcile(
+        self, *, number: str, vendor_id: str, marker: str
+    ) -> Bill | None:
+        bill = self._existing_bill(number=number, vendor_id=vendor_id)
+        if bill is not None and marker and bill.reference == marker:
+            return bill
+        return None
+
+
+def _reference_marker(idempotency_key: str | None) -> str:
+    """The value Verirun writes into a Zoho bill's reference number."""
+    return f"verirun:{idempotency_key}" if idempotency_key else ""
 
 
 def _is_vendor(contact: dict[str, Any]) -> bool:
@@ -293,6 +387,7 @@ def _bill(bill: dict[str, Any]) -> Bill:
         currency=_text(bill.get("currency_code") or "INR"),
         status=BILL_STATUSES.get(raw_status, raw_status),
         received_at=_text(bill.get("date") or bill.get("created_time")),
+        reference=_text(bill.get("reference_number")),
     )
 
 

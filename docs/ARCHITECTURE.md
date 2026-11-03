@@ -53,8 +53,10 @@ creation and payment scheduling. The Mock Suite adapters, the in-memory fake,
 an IMAP source, and a watched-folder source implement them. Zoho Books India is
 the product accounting swap: `ZohoAccountingReads` reads vendors, purchase
 orders, bills, and payments from a read-only OAuth token, and
-`ZohoAccountingSystem` adds the write half when the approval ticket lands
-(ADR 0007, ADR 0009).
+`ZohoAccountingSystem` adds purchase-bill creation through a separate write
+token. The write records the Run's idempotency key in the bill's reference
+number and reconciles by vendor and invoice number before repeating a write
+(ADR 0007, ADR 0009, ADR 0010).
 
 India GST invoices go through `invoice.extract`: the model returns every field
 with a confidence and an exact citation, and deterministic GSTIN and tax
@@ -189,7 +191,9 @@ task-specific logic; swapping the Task Pack swaps the task. Demonstrated with
   when the approval ticket lands.
 - The HTTP client walks every `page_context` page, retries 429 and 5xx with
   backoff, honours `Retry-After`, refreshes the access token once on 401, and
-  maps 404 and Zoho code 1002 to `NotFoundError`.
+  maps 404 and Zoho code 1002 to `NotFoundError`. A write retries only a
+  rate-limited request; a network error or 5xx becomes an unknown outcome for
+  reconciliation, never a blind retry.
 - The refresh and access tokens live in one Fernet-encrypted file with mode
   `0600`. The operator supplies the encryption key; a wrong key fails with an
   actionable error and never prints a token.
@@ -202,9 +206,13 @@ task-specific logic; swapping the Task Pack swaps the task. Demonstrated with
 ## 6. Human-in-the-loop
 
 Approval Gates are declared per Task Pack. Irreversible actions (schedule payment above
-limit, create vendor) may be prepared but not submitted. Decisions
-arrive through the dashboard approval queue. Timeouts never auto-approve. Ambiguity or
-repeated failure escalates with a question.
+limit, create vendor, create a purchase bill) may be prepared but not submitted.
+The gate reads the Tool's own facts plus facts the engine already recorded for the Run:
+a bill above the INR threshold, a new or unmatched vendor, a missing purchase order the
+Task Pack requires, or an extraction below the confidence threshold parks the Run. An
+inactive vendor is a `forbid` denial, not a gate. Decisions arrive through the dashboard
+approval queue, which shows the source invoice, extraction, GST validations, and proposed
+bill. Timeouts never auto-approve. Ambiguity or repeated failure escalates with a question.
 
 ## 7. Verification
 
@@ -214,10 +222,18 @@ executor's messages and does not trust screenshots. Output: pass/fail per criter
 evidence references. Screenshots are display evidence only.
 
 The India pack's `accounting_invoice_matches` check resolves each extracted invoice
-against the read-only accounting client: one vendor whose GSTIN and name agree, no
-live bill with the same vendor and number, and, when the source cites a purchase order,
-one open order whose amount and currency agree. Evidence references are system ids such
-as `accounting:vendor:<id>` and `accounting:purchaseorder:<id>`.
+against the read-only accounting client: one vendor whose GSTIN and name agree, no live
+bill with the same vendor and number other than the bill this Run's own write names, and,
+when the source cites a purchase order, one open order whose amount and currency agree.
+Evidence references are system ids such as `accounting:vendor:<id>` and
+`accounting:purchaseorder:<id>`.
+
+The `india_bill_matches` check re-reads the source tax invoice from its PDF, independently
+of the executor's extraction, and compares the bill that this Run created: exactly one
+bill, the vendor and GSTIN, the invoice number, amount, currency, GSTIN check digit, tax
+arithmetic, the purchase order when the bill cites one, and the source document. The
+Evidence Pack records the approval decision, the journaled write with its idempotency
+key, and these verification results.
 
 The eval harness has two eval-only switches that the product paths leave at their defaults.
 Disabling the Verifier accepts the executor's outcome without a verification pass and writes

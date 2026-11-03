@@ -6,7 +6,12 @@ import httpx
 import pytest
 
 from tests.zoho_fixture import FakeTokens
-from verirun.adapters import ConflictError, NotFoundError, TransientError
+from verirun.adapters import (
+    ConflictError,
+    NotFoundError,
+    TransientError,
+    WriteOutcomeUnknownError,
+)
 from verirun.adapters.zoho.client import ZohoBooksClient
 
 
@@ -166,3 +171,47 @@ def test_an_invalid_request_is_a_conflict_with_the_zoho_message() -> None:
 
     with pytest.raises(ConflictError, match="Invalid value"):
         api.get("/contacts", {"contact_type": "wrong"})
+
+
+def test_a_rate_limited_write_is_retried_and_then_succeeds() -> None:
+    sleeps: list[float] = []
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "2"}, json={"code": 45})
+        return httpx.Response(201, json={"code": 0, "bill": {"bill_id": "1"}})
+
+    api = client(handler, sleep=sleeps.append)
+
+    payload = api.post("/bills", {"bill_number": "PTS/2026/0142"})
+
+    assert payload["bill"]["bill_id"] == "1"
+    assert sleeps == [2.0]
+    assert attempts["count"] == 2
+
+
+def test_a_server_error_on_a_write_is_an_unknown_outcome_without_retry() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(503, json={"code": 9999, "message": "busy"})
+
+    api = client(handler)
+
+    with pytest.raises(WriteOutcomeUnknownError, match="HTTP 503"):
+        api.post("/bills", {"bill_number": "PTS/2026/0142"})
+    assert attempts["count"] == 1
+
+
+def test_a_network_error_on_a_write_is_an_unknown_outcome() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection lost", request=request)
+
+    api = client(handler)
+
+    with pytest.raises(WriteOutcomeUnknownError, match="may not have received"):
+        api.post("/bills", {"bill_number": "PTS/2026/0142"})

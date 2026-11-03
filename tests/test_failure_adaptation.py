@@ -47,6 +47,23 @@ def test_a_low_confidence_extraction_escalates_immediately() -> None:
     assert decision.context["low_confidence_fields"] == ["amount"]
 
 
+def test_an_unknown_write_outcome_escalates_instead_of_retrying() -> None:
+    observation = Observation(
+        ok=False,
+        summary="Zoho Books returned HTTP 503 for the write to /bills",
+        error_kind="unknown",
+        data={"write_outcome": "unknown", "path": "/bills"},
+    )
+
+    decision = classify_failure(
+        observation, failed_attempts=0, transient_attempts=0, replans_used=0
+    )
+
+    assert decision.action is FailureAction.ESCALATE
+    assert "unknown write outcome" in decision.reason
+    assert "will not retry" in (decision.question or "")
+
+
 def settings_for(tmp_path: Path, ledgerlite_db: Path, maildesk_state) -> Settings:
     return Settings(
         _env_file=None,

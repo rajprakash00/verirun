@@ -35,7 +35,7 @@ from verirun.engine.adapt import (
     classify_failure,
 )
 from verirun.engine.approve import prepare_approval
-from verirun.engine.models import Observation, Step
+from verirun.engine.models import IDEMPOTENCY_KEY_ARG, Observation, Step
 from verirun.engine.plan import plan_run
 from verirun.engine.states import RunState, StepState
 from verirun.llm.client import AssistantTurn, LLMClient, Message, ToolCall
@@ -524,13 +524,14 @@ class _Executor:
             return Observation.model_validate(entry.result)
         approved = self.store.approved_approval_for(self.run_id, key)
         self.store.record_action(self.run_id, key, call.name, call.arguments)
+        invocation = {**call.arguments, IDEMPOTENCY_KEY_ARG: key}
         if approved is not None:
             # A human approved this exact action; submit it without re-gating.
-            observation = tool.invoke(call.arguments)
+            observation = tool.invoke(invocation)
             if observation.ok:
                 self.store.mark_approval_executed(approved.id)
         else:
-            observation = self.registry.invoke(call.name, call.arguments)
+            observation = self.registry.invoke(call.name, invocation)
         if observation.ok:
             self.store.complete_action(self.run_id, key, observation.model_dump())
         else:

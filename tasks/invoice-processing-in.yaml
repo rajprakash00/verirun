@@ -2,10 +2,12 @@ id: invoice-processing-in
 title: India GST invoice processing
 goal_template: >-
   Turn supplier invoice emails from the AP mailbox into a reviewable India GST
-  extraction with per-field citations and GST validations, then archive the
-  source document. Request: {request}
+  extraction with per-field citations and GST validations, match the supplier
+  and purchase order against Zoho Books, create one purchase bill after any
+  required human approval, and archive the source document. Request: {request}
 sop: india-gst-extraction
-policies: []
+policies:
+  - india-ap
 tools:
   - mail.list
   - mail.read
@@ -15,25 +17,86 @@ tools:
   - invoice.extract
   - files.archive
   - erp.list_vendors
+  - erp.get_vendor
   - erp.list_purchase_orders
   - erp.get_purchase_order
   - erp.list_invoices
   - erp.get_invoice
+  - erp.file_invoice
+default_currency: INR
+requires_purchase_order: true
+approval_rules:
+  - id: bill-approval-threshold
+    description: >-
+      A purchase bill above 10,000.00 INR waits for a human yes before it is
+      created in Zoho Books.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: bill-amount-differs-from-extraction
+    description: >-
+      A bill whose amount differs from the extracted invoice total waits for a
+      human yes before it is created.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: bill-vendor-differs-from-extraction
+    description: >-
+      A bill against a new, unmatched, or different vendor waits for a human yes
+      before it is created.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: bill-purchase-order-differs-from-extraction
+    description: >-
+      A bill whose purchase order differs from the printed reference waits for
+      a human yes before it is created.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: missing-purchase-order-needs-approval
+    description: >-
+      A bill without the purchase order this Task Pack requires waits for a
+      human yes before it is created.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: low-confidence-extraction-needs-approval
+    description: >-
+      A bill from an extraction below the confidence threshold waits for a human
+      yes before it is created.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: no-bill-for-inactive-vendor
+    description: >-
+      A bill for an inactive vendor is forbidden. This is a denial, not an
+      approval gate.
+    policy: india-ap
+    actions:
+      - bill.create
 extraction:
   confidence_threshold: 0.8
 verification:
-  - id: source-archived
-    description: The source invoice document is in the processed archive.
-    check: file_archived
-    params:
-      directory: processed
+  - id: bill-filed
+    description: >-
+      The purchase bill exists in Zoho Books exactly once and its vendor,
+      GSTIN, invoice number, amount, and tax components agree with the source
+      tax invoice.
+    check: india_bill_matches
+    params: {}
   - id: accounting-invoice-matches
     description: >-
       The extracted invoice resolves to one vendor with the same GSTIN and name,
-      has no existing bill with the same number, and agrees with its purchase
+      has no other live bill with the same number, and agrees with its purchase
       order when the source cites one.
     check: accounting_invoice_matches
     params:
       require_purchase_order: false
       purchase_order_statuses:
         - open
+  - id: source-archived
+    description: The source invoice document is in the processed archive.
+    check: file_archived
+    params:
+      directory: processed

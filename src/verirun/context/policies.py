@@ -97,6 +97,16 @@ class PolicySet:
     def ids(self) -> list[str]:
         return list(self._policies)
 
+    def subset(self, policy_ids: list[str]) -> PolicySet:
+        """The policies a Task Pack selected, in the original order."""
+        missing = [policy_id for policy_id in policy_ids if policy_id not in self._policies]
+        if missing:
+            raise PolicyEvaluationError(
+                f"unknown policies: {', '.join(missing)}; "
+                f"available: {', '.join(self._policies)}"
+            )
+        return PolicySet([self._policies[policy_id] for policy_id in policy_ids])
+
     def evaluate(self, action: str, facts: dict[str, Any] | None = None) -> PolicyDecision:
         facts = facts or {}
         forbid: tuple[Policy, PolicyRule] | None = None
