@@ -48,6 +48,7 @@ CREATE TABLE invoices (
     status TEXT NOT NULL CHECK (status IN ('received', 'approved', 'paid', 'rejected')),
     received_at TEXT NOT NULL,
     scenario TEXT NOT NULL,
+    reference TEXT NOT NULL DEFAULT '',
     UNIQUE (vendor_id, number)
 );
 
@@ -92,3 +93,6 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 def initialize(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(invoices)")}
+    if "reference" not in columns:
+        conn.execute("ALTER TABLE invoices ADD COLUMN reference TEXT NOT NULL DEFAULT ''")

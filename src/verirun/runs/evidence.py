@@ -8,6 +8,7 @@ HTML rendering of the same payload lives in ``verirun.runs.report``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -154,6 +155,23 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
             }
             for escalation in escalations
         ],
+        "exceptions": [
+            {
+                "id": exception.id,
+                "journal_key": exception.journal_key,
+                "kind": exception.kind,
+                "summary": exception.summary,
+                "question": exception.question,
+                "evidence": exception.evidence,
+                "status": exception.status,
+                "resolution": exception.resolution,
+                "created_at": exception.created_at.isoformat(),
+                "resolved_at": exception.resolved_at.isoformat()
+                if exception.resolved_at
+                else None,
+            }
+            for exception in store.list_exceptions(run.id)
+        ],
         "approvals": [
             {
                 "id": request.id,
@@ -196,10 +214,12 @@ def build_evidence(run: Run, store: RunStore) -> dict[str, Any]:
 
 
 def write_evidence(run: Run, store: RunStore, directory: str | Path) -> Path:
-    """Write the Evidence Pack into a Run's directory and return its path."""
+    """Write the Evidence Pack into a Run's directory and index its hash."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "evidence.json"
     payload = json.dumps(build_evidence(run, store), indent=2, ensure_ascii=False)
     path.write_text(payload + "\n", encoding="utf-8")
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    store.record_evidence_pack(run.id, str(path), digest)
     return path

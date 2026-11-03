@@ -42,7 +42,17 @@ class RunSummary(BaseModel):
     updated_at: datetime
 
 
+JournalStatus = Literal["intent", "done", "failed", "unknown"]
+
+
 class JournalEntry(BaseModel):
+    """One side effect in the Run's outbox.
+
+    ``intent`` is committed before the external call, ``done`` after it, and
+    ``unknown`` when the call may have landed but its outcome could not be
+    determined. ``unknown`` is never retried automatically.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     id: int
@@ -50,9 +60,71 @@ class JournalEntry(BaseModel):
     key: str
     action: str
     payload: dict[str, Any] = Field(default_factory=dict)
-    status: Literal["intent", "done", "failed"]
+    status: JournalStatus
     result: dict[str, Any] | None = None
     error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SideEffectClaim(BaseModel):
+    """One natural-key claim, such as a vendor invoice number, held by a Run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_key: str
+    run_id: str
+    journal_key: str
+    status: Literal["claimed", "done"]
+    detail: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class EvidencePackRecord(BaseModel):
+    """The index entry for one Run's Evidence Pack file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    path: str
+    sha256: str
+    created_at: datetime
+
+
+class RunException(BaseModel):
+    """A Run parked because a side effect needs human reconciliation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    run_id: str
+    journal_key: str | None = None
+    kind: str
+    summary: str
+    question: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["open", "resolved"] = "open"
+    resolution: str | None = None
+    created_at: datetime
+    resolved_at: datetime | None = None
+
+
+class QueueItem(BaseModel):
+    """One unit of worker work: start a Run, or resume a parked one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    run_id: str
+    kind: Literal["start", "resume"]
+    status: Literal["queued", "leased", "done", "dead"]
+    attempts: int
+    max_attempts: int
+    available_at: datetime
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+    last_error: str | None = None
     created_at: datetime
     updated_at: datetime
 

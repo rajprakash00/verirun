@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Exceptions — Verirun{% endblock %}
+{% block content %}
+<h1>Exceptions</h1>
+<p class="subtitle">
+  Runs whose side effects need a human to reconcile. Verirun does not retry an
+  unknown write by itself.
+</p>
+{% if exceptions %}
+<table>
+  <thead>
+    <tr><th>Run</th><th>Kind</th><th>Summary</th><th>Evidence</th><th>Created</th></tr>
+  </thead>
+  <tbody>
+    {% for exception in exceptions %}
+    <tr>
+      <td><a href="/runs/{{ exception.run_id }}"><code>{{ exception.run_id }}</code></a></td>
+      <td><code>{{ exception.kind }}</code></td>
+      <td>
+        {{ exception.summary }}
+        {% if exception.question %}<div class="muted">{{ exception.question }}</div>{% endif %}
+      </td>
+      <td>
+        {% for key, value in exception.evidence.items() %}
+        <div class="muted"><code>{{ key }}</code>: {{ value }}</div>
+        {% endfor %}
+        <form method="post" action="/exceptions/{{ exception.id }}/resolve" class="actions">
+          <select name="outcome">
+            <option value="landed">Landed in the system</option>
+            <option value="not_landed">Did not land</option>
+            <option value="acknowledged">Acknowledge only</option>
+          </select>
+          <input type="text" name="bill_id" placeholder="external id (if landed)">
+          <input type="text" name="resolution" placeholder="what you found">
+          <button type="submit">Resolve</button>
+        </form>
+      </td>
+      <td class="muted">{{ exception.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No open Exceptions.</p>
+{% endif %}
+{% endblock %}

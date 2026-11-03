@@ -103,7 +103,7 @@ def run_scanned(
 ) -> tuple[int, str, RunStore, str]:
     settings = run_settings(tmp_path, ledgerlite_db=ledgerlite_db, maildesk_state=maildesk_state)
     code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=scanned_script(**confidences),
     )

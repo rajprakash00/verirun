@@ -10,7 +10,8 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any, ClassVar
 
-from verirun.adapters import AccountingSystem, AdapterError
+from verirun.adapters import AccountingSystem, AdapterError, Bill
+from verirun.adapters.rules import reference_marker
 from verirun.engine.models import IDEMPOTENCY_KEY_ARG, Observation
 from verirun.tools.base import Tool, ToolError, optional_str, require_str
 
@@ -310,6 +311,53 @@ class FileInvoiceTool(ErpTool):
             gr_id=gr_id,
             idempotency_key=optional_str(args, IDEMPOTENCY_KEY_ARG),
         )
+        return self._observation(bill)
+
+    def claim_key(self, args: dict[str, Any]) -> str | None:
+        """One purchase bill per vendor and invoice number, across every Run."""
+        number = optional_str(args, "number")
+        vendor_id = optional_str(args, "vendor_id")
+        if not number or not vendor_id:
+            return None
+        normalized = " ".join(number.split()).casefold()
+        return f"bill:{vendor_id.strip()}:{normalized}"
+
+    def claim_detail(self, args: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "number": args.get("number"),
+            "vendor_id": args.get("vendor_id"),
+            "amount": args.get("amount"),
+            "currency": args.get("currency") or self.default_currency,
+        }
+
+    def reconcile(
+        self, args: dict[str, Any], idempotency_key: str
+    ) -> Observation | None:
+        """Adopt the bill this Run's own key already wrote, if it exists.
+
+        A bill with the same vendor and number but a different marker belongs
+        to someone else and is left for the adapter to reject as a duplicate.
+        A read that cannot answer is an unknown outcome, not an absent bill.
+        """
+        number = optional_str(args, "number")
+        vendor_id = optional_str(args, "vendor_id")
+        if not number or not vendor_id or not idempotency_key:
+            return None
+        try:
+            bills = self.accounting.list_bills(number=number, vendor_id=vendor_id)
+        except AdapterError as exc:
+            raise ToolError(
+                "unknown",
+                f"cannot reconcile the earlier write: {exc.message}",
+                {**exc.data, "write_outcome": "unknown"},
+            ) from exc
+        marker = reference_marker(idempotency_key)
+        matches = [bill for bill in bills if bill.reference == marker]
+        if len(matches) == 1:
+            return self._observation(matches[0])
+        return None
+
+    def _observation(self, bill: Bill) -> Observation:
         return Observation(
             ok=True,
             summary=(

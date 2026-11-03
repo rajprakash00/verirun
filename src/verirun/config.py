@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     company_dir: Path = Path("company")
     tasks_dir: Path = Path("tasks")
     run_db: Path = Path("runs/verirun.db")
+    database_url: str = ""
     shared_dir: Path = Path("shared")
     mail_db: Path = Path("mocks/state/maildesk.db")
     erp_db: Path = Path("mocks/state/ledgerlite.db")

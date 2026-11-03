@@ -65,6 +65,18 @@ Shared vocabulary for this project. A glossary only. No implementation details.
 
 **Idempotency Key** — the stable key for one side effect, derived from the Run's Step, Tool, and arguments. It is journaled before the call; a retry reconciles the earlier write instead of repeating it.
 
+**Outbox** — the journal of side effects written before and after an external call. An `intent` is committed before the call, `done` after it, and `unknown` when the effect may have landed but cannot be confirmed. The outbox is what a resume reads to decide whether to reconcile or write.
+
+**Unknown Outcome** — a side effect whose result cannot be established, such as a timeout after a bill was submitted. It is never retried automatically; it parks the Run on an Exception.
+
+**Exception** — a Run parked for a human because a side effect needs reconciliation, such as an unknown write outcome. The Exception carries the journal key, the proposed action, its natural key, and the error evidence.
+
+**Worker** — the process that claims queued Runs with a lease and executes them. The CLI and dashboard enqueue work; they do not run long tasks inside the request.
+
+**Lease** — a time-bounded claim on a queued Run. A worker renews it while running; a crash lets it expire so another worker can resume the Run.
+
+**Side-Effect Claim** — a natural-key reservation written with the outbox intent. A purchase bill is claimed once per vendor and invoice number, across every Run.
+
 **GSTIN** — the 15-character Goods and Services Tax identification number of a registered Indian supplier. Its last character is a check digit, so a mistyped GSTIN can be caught before a bill is created.
 
 **Citation** — the exact line of a source document that supports one extracted field. A value without a citation is not reviewable.

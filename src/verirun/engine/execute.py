@@ -40,6 +40,8 @@ from verirun.engine.plan import plan_run
 from verirun.engine.states import RunState, StepState
 from verirun.llm.client import AssistantTurn, LLMClient, Message, ToolCall
 from verirun.llm.meter import CostMeter
+from verirun.runs.errors import ClaimConflictError, UnknownActionError
+from verirun.tools.base import ToolError
 
 if TYPE_CHECKING:
     from verirun.context.task_pack import TaskPack
@@ -87,6 +89,81 @@ def _approval_required(observation: Observation) -> bool:
         observation.error_kind == "policy"
         and observation.data.get("approval_required") is True
     )
+
+
+def _unknown_evidence(
+    tool: Any,
+    key: str,
+    action: str,
+    arguments: dict[str, Any],
+    summary: str,
+    *,
+    error_data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "tool": getattr(tool, "name", action),
+        "journal_key": key,
+        "arguments": arguments,
+        "claim_key": tool.claim_key(arguments),
+        "claim_detail": tool.claim_detail(arguments),
+        "error": summary,
+    }
+    if error_data:
+        evidence["error_data"] = error_data
+    return evidence
+
+
+def _unknown_question(action: str, tool: Any, arguments: dict[str, Any]) -> str:
+    return (
+        f"The {action} write may or may not have landed. Check the external system "
+        f"for {tool.claim_detail(arguments) or arguments} before resuming the Run. "
+        "Verirun will not retry it by itself."
+    )
+
+
+def reconcile_outbox(store: RunStore, run_id: str, registry: ToolRegistry) -> bool:
+    """Resolve interrupted writes by their natural key before the model runs.
+
+    A resumed Run must not depend on the model re-emitting the exact call.
+    Returns True when an unresolved outcome parked the Run on an Exception.
+    """
+    for entry in store.list_outbox(run_id):
+        if entry.status != "intent":
+            continue
+        tool = registry.get(entry.action)
+        if tool is None or not tool.side_effect:
+            continue
+        try:
+            reconciled = tool.reconcile(entry.payload, entry.key)
+        except ToolError as exc:
+            if exc.kind == "unknown" or exc.data.get("write_outcome") == "unknown":
+                store.mark_action_unknown(run_id, entry.key, exc.message)
+                store.record_exception(
+                    run_id,
+                    kind="unknown_write_outcome",
+                    summary=exc.message,
+                    question=_unknown_question(entry.action, tool, entry.payload),
+                    evidence=_unknown_evidence(
+                        tool,
+                        entry.key,
+                        entry.action,
+                        entry.payload,
+                        exc.message,
+                        error_data=exc.data,
+                    ),
+                    journal_key=entry.key,
+                )
+                store.escalate(
+                    run_id,
+                    reason=f"unknown write outcome: {exc.message}",
+                    question=_unknown_question(entry.action, tool, entry.payload),
+                    context={"journal_key": entry.key, "action": entry.action},
+                )
+                return True
+            continue
+        if reconciled is not None:
+            store.complete_action(run_id, entry.key, reconciled.model_dump())
+    return False
 
 
 class RunBudget:
@@ -187,6 +264,8 @@ def execute_run(
         run = store.transition(run_id, RunState.EXECUTING)
     if run.state is not RunState.EXECUTING:
         return run
+    if reconcile_outbox(store, run_id, registry):
+        return store.get_run(run_id)
     budget = RunBudget(
         store,
         run_id,
@@ -522,8 +601,39 @@ class _Executor:
         entry = self.store.get_journal_entry(self.run_id, key)
         if entry is not None and entry.status == "done" and entry.result is not None:
             return Observation.model_validate(entry.result)
+        if entry is not None and entry.status == "unknown":
+            return self._unknown_outcome(tool, key, entry.action, call.arguments)
+        if entry is not None and entry.status == "intent":
+            reconciled = self._reconcile(tool, key, entry.action, call.arguments)
+            if reconciled is not None:
+                return reconciled
         approved = self.store.approved_approval_for(self.run_id, key)
-        self.store.record_action(self.run_id, key, call.name, call.arguments)
+        try:
+            self.store.record_action(
+                self.run_id,
+                key,
+                call.name,
+                call.arguments,
+                claim_key=tool.claim_key(call.arguments),
+                claim_detail=tool.claim_detail(call.arguments),
+            )
+        except ClaimConflictError as exc:
+            return Observation(
+                ok=False,
+                summary=(
+                    f"{exc.claim.claim_key} is already claimed by Run "
+                    f"{exc.claim.run_id}; this Run will not write it again"
+                ),
+                error_kind="invalid",
+                data={
+                    "duplicate": True,
+                    "claim_key": exc.claim.claim_key,
+                    "existing_run_id": exc.claim.run_id,
+                    "existing_journal_key": exc.claim.journal_key,
+                },
+            )
+        except UnknownActionError:
+            return self._unknown_outcome(tool, key, call.name, call.arguments)
         invocation = {**call.arguments, IDEMPOTENCY_KEY_ARG: key}
         if approved is not None:
             # A human approved this exact action; submit it without re-gating.
@@ -534,9 +644,105 @@ class _Executor:
             observation = self.registry.invoke(call.name, invocation)
         if observation.ok:
             self.store.complete_action(self.run_id, key, observation.model_dump())
+        elif observation.data.get("write_outcome") == "unknown":
+            self._record_unknown(tool, key, call.name, call.arguments, observation)
         else:
             self.store.fail_action(self.run_id, key, observation.summary)
         return observation
+
+    def _reconcile(
+        self,
+        tool: Any,
+        key: str,
+        action: str,
+        arguments: dict[str, Any],
+    ) -> Observation | None:
+        """Check whether a crash-interrupted write already landed."""
+        try:
+            reconciled = tool.reconcile(arguments, key)
+        except ToolError as exc:
+            if exc.kind == "unknown" or exc.data.get("write_outcome") == "unknown":
+                self._record_unknown(
+                    tool,
+                    key,
+                    action,
+                    arguments,
+                    Observation(ok=False, summary=exc.message, error_kind="unknown", data=exc.data),
+                )
+                return Observation(
+                    ok=False,
+                    summary=exc.message,
+                    error_kind="unknown",
+                    data={**exc.data, "write_outcome": "unknown"},
+                )
+            return Observation(
+                ok=False, summary=exc.message, error_kind=exc.kind, data=exc.data
+            )
+        if reconciled is None:
+            return None
+        self.store.complete_action(self.run_id, key, reconciled.model_dump())
+        return reconciled
+
+    def _unknown_outcome(
+        self,
+        tool: Any,
+        key: str,
+        action: str,
+        arguments: dict[str, Any],
+    ) -> Observation:
+        """Refuse to invoke an unknown write again, and keep the Exception open."""
+        entry = self.store.get_journal_entry(self.run_id, key)
+        summary = entry.error if entry is not None and entry.error else "write outcome is unknown"
+        exception = self.store.exception_for(
+            self.run_id, key, "unknown_write_outcome"
+        )
+        evidence = _unknown_evidence(tool, key, action, arguments, summary)
+        if exception is None:
+            exception = self.store.record_exception(
+                self.run_id,
+                kind="unknown_write_outcome",
+                summary=summary,
+                question=_unknown_question(action, tool, arguments),
+                evidence=evidence,
+                journal_key=key,
+            )
+        return Observation(
+            ok=False,
+            summary=summary,
+            error_kind="unknown",
+            data={
+                "write_outcome": "unknown",
+                "exception_id": exception.id,
+                "claim_key": evidence["claim_key"],
+                "journal_key": key,
+            },
+        )
+
+    def _record_unknown(
+        self,
+        tool: Any,
+        key: str,
+        action: str,
+        arguments: dict[str, Any],
+        observation: Observation,
+    ) -> None:
+        """Move one outbox entry to ``unknown`` and attach the reconciliation evidence."""
+        self.store.mark_action_unknown(self.run_id, key, observation.summary)
+        self.store.record_exception(
+            self.run_id,
+            kind="unknown_write_outcome",
+            summary=observation.summary,
+            question=_unknown_question(action, tool, arguments),
+            evidence=_unknown_evidence(
+                tool,
+                key,
+                action,
+                arguments,
+                observation.summary,
+                error_data=observation.data,
+            ),
+            journal_key=key,
+        )
 
     def _messages(self, position: int, step: Step, total: int) -> list[Message]:
         goal = self.run.work_order.goal if self.run.work_order else "(no Work Order)"

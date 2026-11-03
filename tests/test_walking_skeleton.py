@@ -106,7 +106,7 @@ def test_invoice_processing_completes_and_reports_verified(
     settings = skeleton_settings(tmp_path, ledgerlite_db, maildesk_state)
 
     code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=happy_script(),
     )
@@ -171,7 +171,7 @@ def test_skipping_the_erp_write_makes_verification_fail(
     )
 
     code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=script,
     )
@@ -210,7 +210,7 @@ def test_a_failed_resolve_still_leaves_an_evidence_pack(
     settings = skeleton_settings(tmp_path, ledgerlite_db, maildesk_state)
 
     code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=ScriptedClient(["not json", "still not json"]),
     )
@@ -236,7 +236,7 @@ def test_report_writes_the_evidence_pack_for_a_finished_run(
 ) -> None:
     settings = skeleton_settings(tmp_path, ledgerlite_db, maildesk_state)
     main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=happy_script(),
     )

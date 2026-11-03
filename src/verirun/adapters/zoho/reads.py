@@ -31,7 +31,11 @@ from verirun.adapters.base import (
     WriteOutcomeUnknownError,
 )
 from verirun.adapters.matching import gstin_key, name_key
-from verirun.adapters.rules import duplicate_bill_error, require_positive_amount
+from verirun.adapters.rules import (
+    duplicate_bill_error,
+    reference_marker,
+    require_positive_amount,
+)
 from verirun.adapters.zoho.client import ZohoBooksClient
 
 BILL_STATUSES = {
@@ -246,7 +250,7 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
                 "Zoho Books has no goods receipts; a bill cannot reference one"
             )
         self.get_vendor(vendor_id)
-        marker = _reference_marker(idempotency_key)
+        marker = reference_marker(idempotency_key)
         duplicate = self._existing_bill(number=number, vendor_id=vendor_id)
         if duplicate is not None:
             if marker and duplicate.reference == marker:
@@ -316,11 +320,6 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
         if bill is not None and marker and bill.reference == marker:
             return bill
         return None
-
-
-def _reference_marker(idempotency_key: str | None) -> str:
-    """The value Verirun writes into a Zoho bill's reference number."""
-    return f"verirun:{idempotency_key}" if idempotency_key else ""
 
 
 def _is_vendor(contact: dict[str, Any]) -> bool:

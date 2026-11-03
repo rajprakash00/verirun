@@ -75,7 +75,7 @@ def test_ambiguous_request_stops_with_an_open_question(
     ambiguous = dict(WORK_ORDER, open_questions=["Which invoice should be processed?"])
 
     code = main(
-        ["run", "Handle the invoice situation", "--task", "invoice-processing"],
+        ["run", "Handle the invoice situation", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=ScriptedClient([json.dumps(ambiguous)]),
     )
@@ -128,8 +128,57 @@ def test_invalid_task_pack_is_rejected_with_a_precise_error(
 def test_missing_task_flag_is_a_usage_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     settings = make_settings(tmp_path)
 
-    code = main(["run", "Process the invoices"], settings=settings, client=ScriptedClient([]))
+    code = main(["run", "Process the invoices", "--wait"], settings=settings, client=ScriptedClient([]))
 
     error = capsys.readouterr().err
     assert code == 2
     assert "--task is required" in error
+
+
+def test_run_queues_work_instead_of_executing_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings = make_settings(tmp_path)
+
+    code = main(
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        settings=settings,
+        client=ScriptedClient([]),
+    )
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "queued" in output
+    store = RunStore(settings.run_db)
+    run = store.list_runs()[0]
+    assert run.state is RunState.CREATED
+    item = store.active_queue_item(run.id, "start")
+    assert item is not None and item.status == "queued"
+
+
+def test_the_worker_command_executes_one_queued_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    settings = make_settings(tmp_path)
+    ambiguous = dict(WORK_ORDER, open_questions=["Which invoice should be processed?"])
+
+    main(
+        ["run", "Handle the invoice situation", "--task", "invoice-processing"],
+        settings=settings,
+        client=ScriptedClient([]),
+    )
+    capsys.readouterr()
+
+    code = main(
+        ["worker", "--once"],
+        settings=settings,
+        client=ScriptedClient([json.dumps(ambiguous)]),
+    )
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "Ran RUN-" in output
+    store = RunStore(settings.run_db)
+    run = store.get_run(store.list_runs()[0].id)
+    assert run.state is RunState.NEEDS_HUMAN
+    assert store.list_queue(status="done")

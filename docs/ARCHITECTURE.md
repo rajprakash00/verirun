@@ -244,15 +244,46 @@ irreversible actions. See ADR 0006.
 
 ## 8. Reliability and state
 
-- Run store (SQLite): run state, checkpoints, observations, Evidence Pack index.
-- Action journal with idempotency keys: retries never repeat completed side effects.
-- Browser re-grounding: a stale ref is re-resolved against a fresh snapshot by role
-  and accessible name; a control the accessibility tree lacks is located by a
-  screenshot and the vision model. The locator an action used is recorded in the
-  Observation, and therefore in the journal, so a retry replays it.
-- Checkpointing: a failed run resumes from its last checkpoint.
-- Step and cost meters per run; the run stops at its limit.
+- **Two run stores.** SQLite is the zero-dependency demo and test store.
+  `VERIRUN_DATABASE_URL` selects a PostgreSQL store for the product path. Both
+  run the same schema and the same `RunStore` methods.
+- **The journal is the outbox.** The `intent` and the natural-key claim are
+  committed in one transaction before an external call; `done` is committed after
+  it. A definite failure is `failed`. A timeout or 5xx that may have landed is
+  `unknown`, and `unknown` is never invoked again.
+- **Reconcile before retry.** On resume, an `intent` asks the Tool whether its
+  write landed. `erp.file_invoice` adopts only a bill carrying this Run's
+  idempotency marker; a bill without it is treated as a duplicate. A read that
+  cannot answer leaves the entry `unknown`.
+- **Natural-key claims.** `side_effect_claims` has `claim_key` as its primary
+  key; a purchase bill is `bill:<vendor_id>:<number>`. A second Run cannot write
+  the same vendor invoice while the first is unresolved. LedgerLite and the
+  in-memory fake keep their own unique constraint as the system-of-record backstop.
+- **Leased worker queue.** `work_queue` holds at most one active `start` or
+  `resume` job per Run. SQLite claims under `BEGIN IMMEDIATE`; PostgreSQL uses
+  `FOR UPDATE SKIP LOCKED`. The worker renews its lease while running, and a
+  crashed worker's lease expires so another can claim it. Exhausted jobs move to
+  `dead` with the last error.
+- **Producers enqueue.** `verirun run` queues a start job (with `--wait` as a
+  local convenience), and an approval POST queues a resume job. `verirun worker`
+  is the consumer.
+- **Exceptions.** An unknown write records a `run_exceptions` row with the
+  journal key, action, arguments, claim key and detail, adapter error, and a
+  question. The Run stays `needs_human`, and the dashboard and Evidence Pack show
+  the Exception.
+- **Browser re-grounding.** A stale ref is re-resolved against a fresh snapshot
+  by role and accessible name; a control the accessibility tree lacks is located
+  by a screenshot and the vision model. The locator an action used is recorded in
+  the Observation, and therefore in the journal, so a retry replays it.
+- **Checkpointing.** A resumed Run skips completed Steps and never repeats a
+  journaled side effect.
+- **Meters.** Step and cost counters are per Run; the Run stops at its limit.
+- **Chaos test.** `tests/test_crash_safety.py` kills the worker before intent,
+  after intent before the call, after the call before `done`, and after `done`.
+  Every resume ends with exactly one purchase bill; an unknown outcome parks with
+  an Exception and is not retried.
 - Failures are scenario-driven and seeded, never random.
+
 
 ## 9. LLM layer and cost control
 
@@ -269,6 +300,8 @@ irreversible actions. See ADR 0006.
 | --- | --- |
 | Language | Python 3.12+ with `uv` |
 | Data models | Pydantic |
+| Run store | SQLite for demo/tests; PostgreSQL with `psycopg` for the product worker |
+| Worker queue | Leased `work_queue` table (`FOR UPDATE SKIP LOCKED`) |
 | Browser | Playwright (accessibility-tree refs) |
 | Mock apps | FastAPI + SQLite + Jinja templates |
 | Dashboard | FastAPI + lightweight HTML/JS |
@@ -298,13 +331,14 @@ verirun/
 │   └── vendor-onboarding.yaml
 ├── src/verirun/
 │   ├── demo.py                # one-command demo
+│   ├── worker.py              # leased queue consumer
 │   ├── adapters/              # MailSource + AccountingSystem seams, IMAP, folder, fakes
 │   ├── engine/                # state machine, planner, executor, verifier
 │   ├── context/               # Company Context loader, Work Order
 │   ├── india/                 # India GST schema, GSTIN and tax validations
 │   ├── llm/                   # provider client, replay, cost meter
 │   ├── tools/                 # browser, files, mail, erp, invoice extraction
-│   ├── runs/                  # run store, journal, evidence pack
+│   ├── runs/                  # run store, SQLite/PostgreSQL adapter, journal, evidence
 │   └── web/                   # dashboard + API
 ├── mocks/                     # Mock Suite
 │   ├── maildesk/

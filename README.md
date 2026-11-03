@@ -124,21 +124,35 @@ pushes to `main` that change it
 
 ## Run a real request (live model)
 
+Start a worker, then enqueue a request:
+
 ```bash
 uv run python scripts/seed_mocks.py
+uv run verirun worker                         # terminal 1
 uv run verirun run "Process the invoices in the AP mailbox" --task invoice-processing
 ```
 
-`--task` is required: it selects the Task Pack. The other pack is
-`vendor-onboarding`, for example:
+`verirun run` creates the Run and queues a `start` job; the worker claims it and
+executes it. Add `--wait` to run the queue in the same process when you do not
+want a second terminal. `--task` is required: it selects the Task Pack. The other
+pack is `vendor-onboarding`, for example:
 
 ```bash
 uv run verirun run "Onboard the new supplier from the procurement mailbox" --task vendor-onboarding
 ```
 
-The CLI prints the Work Order, the Plan, the Verifier's checks, and where the
-Evidence Pack was written. A Run that needs a human exits non-zero and parks in
-`needs_human` (question) or `awaiting_approval` (approval queue).
+The worker can run with `--once` for a single job, `--max-items N`, or
+`--lease-seconds`. A Run that needs a human rests in `needs_human` (question) or
+`awaiting_approval` (approval queue); approving or rejecting it in the dashboard
+queues a `resume` job for the worker.
+
+Set `VERIRUN_DATABASE_URL` to a PostgreSQL DSN to use the product store and
+share the queue across worker processes. Without it, the SQLite store keeps the
+demo and tests zero-dependency.
+
+With `--wait`, the CLI prints the Work Order, the Plan, the Verifier's checks, and
+where the Evidence Pack was written; a Run that needs a human exits non-zero and
+parks in `needs_human` (question) or `awaiting_approval` (approval queue).
 
 A live Run registers the browser tools whenever the Task Pack allows them.
 Chromium starts on the first `browser.*` call and writes its screenshots under
@@ -209,9 +223,11 @@ before a pilot, export the same settings and run:
 VERIRUN_ZOHO_LIVE=1 uv run pytest tests/test_zoho_live.py
 ```
 
-To run the match-and-create path end to end against the configured trial:
+To run the match-and-create path end to end against the configured trial, keep a
+worker running and enqueue the Run:
 
 ```bash
+uv run verirun worker
 uv run verirun run "Process the GST invoice in the AP mailbox" \
   --task invoice-processing-in
 ```
@@ -227,8 +243,9 @@ The dashboard lists Runs and shows the Work Order, the Plan, a live timeline of
 steps and tool calls, the approval queue, and the verification results. The
 approval review shows the source invoice, the extraction with citations, the
 GST validations, and the proposed purchase bill.
-Approving an over-limit payment or bill resumes the parked Run; rejecting aborts it with
-the recorded reason. A timeout never auto-approves.
+Approving an over-limit payment or bill queues a `resume` job for the worker;
+rejecting aborts the Run with the recorded reason. A timeout never auto-approves.
+The Exception page shows any Run whose write outcome needs reconciliation.
 
 Browser Steps in a live `run`, a dashboard-resumed Run, or the demo drive pages
 served by these scripts (their URLs match `company/systems.yaml`):
@@ -347,8 +364,33 @@ a new vendor, a duplicate vendor, and a missing tax form.
 - **Verifier** — reads the Task Pack's contract and checks real state through
   the read-only `AccountingReads` adapter and the filesystem. It never reads
   the executor's messages and never trusts a screenshot.
-- **Run store** — SQLite: run state, checkpoints, an action journal with
-  idempotency keys, observations, and the Evidence Pack index.
+- **Run store** — SQLite by default; PostgreSQL when `VERIRUN_DATABASE_URL` is
+  set. It holds run state, checkpoints, the outbox journal with idempotency keys
+  and natural-key claims, the leased work queue, Exceptions, observations, and
+  the Evidence Pack index. The CLI and dashboard enqueue work; `verirun worker`
+  claims and executes it.
+
+### Durable execution
+
+The journal is the outbox: an `intent` and its natural-key claim are committed
+before an external call, and `done` after it. A crash between the two is
+reconciled on resume by looking for the bill that carries the Run's idempotency
+marker. A write whose outcome cannot be established becomes `unknown`, parks the
+Run on an Exception with the vendor, invoice number, journal key, and error, and
+is never retried automatically. A purchase bill is claimed once per vendor and
+invoice number across every Run.
+
+The worker leases jobs. SQLite claims under a write transaction; PostgreSQL uses
+`FOR UPDATE SKIP LOCKED`, renews the lease while running, and reclaims an expired
+lease after a crash. Exhausted jobs move to a dead-letter state.
+`tests/test_crash_safety.py` kills the worker before intent, after intent before
+the call, after the call before `done`, and after `done`; every resume ends with
+exactly one bill, and the unknown-outcome case leaves an Exception. Run that
+demo with:
+
+```bash
+uv run pytest tests/test_crash_safety.py -q
+```
 
 ### Key technical decisions
 
@@ -367,6 +409,7 @@ Each decision and its trade-offs is recorded as an ADR in
 | [0008](docs/adr/0008-india-gst-extraction.md) | IMAP and watched-folder sources ingest into a content-addressed index; India GST extraction returns a confidence and a verified citation per field, with deterministic GSTIN and tax validations in the Evidence Pack. |
 | [0009](docs/adr/0009-zoho-read-only-verifier.md) | Zoho Books reads use an encrypted OAuth token; the Verifier gets a separate read-only object and pre-write vendor, duplicate, and purchase-order matching. |
 | [0010](docs/adr/0010-zoho-write-and-approval.md) | Purchase bills are created through a separate write token, journaled idempotency keys, and reconcile-before-retry; INR, vendor, purchase-order, and confidence facts drive the Approval Gate, and the Verifier re-reads the source PDF. |
+| [0011](docs/adr/0011-durable-execution.md) | PostgreSQL and SQLite share one run store; a leased worker claims queued Runs, the journal is an outbox with `unknown`, natural-key claims stop duplicate bills, and Exceptions carry reconciliation evidence. |
 
 ### Models and APIs
 
@@ -386,6 +429,7 @@ is called at runtime; MailDesk and LedgerLite run locally.
 | `VERIRUN_MAX_STEPS` | `60` | Per-run step meter. |
 | `VERIRUN_MAX_COST_USD` | `5.0` | Per-run cost meter. |
 | `VERIRUN_REQUEST_TIMEOUT_S` | `600` | Per-request model timeout; transient timeouts are retried. |
+| `VERIRUN_DATABASE_URL` | empty | PostgreSQL DSN for the product run store and worker queue; empty uses SQLite. |
 
 Prompt caching is enabled by sending a stable per-run session id header. Model
 prices live in `src/verirun/config.py` and drive the cost meter.
@@ -423,8 +467,9 @@ What is not built:
   later integration with the customer's tax setup.
 - **Authentication, authorization, multi-tenancy, or cloud deployment.** The
   dashboard binds to localhost and has no login or tenant boundary.
-- **A queue, scheduler, or parallel execution.** One process runs one Request at
-  a time; there is no worker pool, cron, or cross-process supervisor.
+- **Parallel execution and scheduling.** The worker processes one job at a time
+  and has no cron, priority classes, or per-tenant pools. Multiple workers share
+  the PostgreSQL queue, but one install still serves one company.
 - **Task coverage beyond the two Task Packs** (`invoice-processing` and
   `vendor-onboarding`). New work means a new Task Pack, not a general-purpose
   agent.
@@ -460,9 +505,9 @@ With two more weeks, in priority order:
    journal: goal template, tool allowlist, approval rules, verification
    contract. A human reviews the draft. This lowers a new kind of work from a
    hand-written pack and check to a review.
-3. **Production hardening, after the above.** A Postgres-backed queue with
-   scheduling, authentication and tenancy, a secrets vault, per-tool capability
-   scopes, and OpenTelemetry audit export.
+3. **Production hardening, after the above.** Authentication and tenancy, a
+   secrets vault, per-tool capability scopes, scheduling and priority classes on
+   the worker queue, and OpenTelemetry audit export.
 
 ## Repository layout
 

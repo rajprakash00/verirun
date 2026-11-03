@@ -33,6 +33,7 @@ from verirun.engine.states import RunState
 from verirun.runs.store import RunStore
 from verirun.runtime import Backends, build_registry
 from verirun.web import create_app
+from verirun.worker import Worker
 
 ESCALATED_PLAN = {
     "steps": [
@@ -163,9 +164,15 @@ def test_approving_over_http_resumes_and_completes_the_run(
     )
     request = store.open_approval(run_id)
     assert request is not None
-    client = TestClient(create_app(settings, client_factory=lambda _run_id: script))
+    client = TestClient(create_app(settings))
 
     response = client.post(f"/approvals/{request.id}/approve", follow_redirects=False)
+
+    # The request only records the decision and queues the resume.
+    assert store.get_run(run_id).state is RunState.AWAITING_APPROVAL
+    assert store.active_queue_item(run_id, "resume") is not None
+
+    Worker(settings, store=store, client_factory=lambda _run_id: script).run_once()
 
     assert response.status_code == 303
     assert response.headers["location"] == f"/runs/{run_id}"
@@ -407,3 +414,58 @@ def test_unknown_runs_and_approvals_return_404(
     assert client.get("/runs/RUN-NOPE").status_code == 404
     assert client.post("/approvals/999/approve").status_code == 404
     assert client.post("/approvals/999/reject", data={"reason": "nope"}).status_code == 404
+
+
+def test_an_exception_is_visible_and_can_be_reconciled(
+    tmp_path: Path, ledgerlite_db: Path, maildesk_state
+) -> None:
+    settings, store, _script, run_id = park_over_limit_run(
+        tmp_path, ledgerlite_db, maildesk_state
+    )
+    key = "step-1:erp.file_invoice:abc"
+    store.record_action(
+        run_id,
+        key,
+        "erp.file_invoice",
+        {"number": "INV-9", "vendor_id": "V-1"},
+        claim_key="bill:V-1:inv-9",
+    )
+    store.mark_action_unknown(run_id, key, "Zoho Books did not answer the create request")
+    exception = store.record_exception(
+        run_id,
+        kind="unknown_write_outcome",
+        summary="Zoho Books did not answer the create request",
+        question="Check the bill in Zoho Books before resuming.",
+        evidence={"claim_key": "bill:V-1:inv-9", "journal_key": key},
+        journal_key=key,
+    )
+    client = TestClient(create_app(settings))
+
+    queue = client.get("/exceptions")
+    run_page = client.get(f"/runs/{run_id}")
+
+    assert queue.status_code == 200
+    assert "Zoho Books did not answer the create request" in queue.text
+    assert "bill:V-1:inv-9" in queue.text
+    assert "Exceptions" in run_page.text
+    assert "unknown_write_outcome" in run_page.text
+
+    response = client.post(
+        f"/exceptions/{exception.id}/resolve",
+        data={
+            "outcome": "landed",
+            "bill_id": "INV-3001",
+            "resolution": "The bill exists in Zoho Books as INV-3001",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/runs/{run_id}"
+    entry = store.get_journal_entry(run_id, key)
+    assert entry is not None and entry.status == "done"
+    assert entry.result is not None and entry.result["data"]["invoice_id"] == "INV-3001"
+    claim = store.get_claim("bill:V-1:inv-9")
+    assert claim is not None and claim.status == "done"
+    assert store.get_exception(exception.id).status == "resolved"
+    assert store.active_queue_item(run_id, "resume") is not None
