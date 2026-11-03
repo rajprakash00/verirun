@@ -1,8 +1,8 @@
 # India GST invoice extraction
 
-Procedure for turning supplier invoice emails into a reviewable India GST
-extraction with citations and validations. This phase stops before any purchase
-bill is created.
+Procedure for turning supplier invoice emails into a created purchase bill in
+Zoho Books, with citations, validations, matching, and any required human
+approval.
 
 ## 1. Collect the invoices
 
@@ -16,8 +16,9 @@ bill is created.
 - Extract supplier name, GSTIN, invoice number, invoice date, taxable amount,
   CGST, SGST, IGST, total, HSN/SAC, PO reference, due date, and currency.
 - Every field must carry a confidence and the exact line that supports it.
-- Never guess a value. A missing required field or a field below the confidence
-  threshold goes to a human.
+- Never guess a value. A missing required field goes to a human. A field below
+  the confidence threshold is still proposed: the purchase bill's Approval Gate
+  is the human review, and the threshold breach is recorded in the evidence.
 
 ## 3. Validate
 
@@ -33,11 +34,19 @@ bill is created.
 - Find the supplier by GSTIN and name in the accounting system.
 - When the invoice cites a purchase order, read it and compare its amount with
   the invoice total.
-- Do not create a purchase bill in this phase.
 
-## 5. Archive and report
+## 5. Create the purchase bill after approval
+
+- Propose one purchase bill for the extracted invoice: vendor, invoice number,
+  total, currency, and purchase order when one matched.
+- Call the bill tool once. Policy decides whether the bill is created now or
+  held for a human. Never create a second bill for the same supplier and
+  invoice number, and never retry a write whose outcome is unknown.
+- A human approval releases the exact prepared bill. A denial stops the Run.
+
+## 6. Archive and report
 
 - Move the source PDF to the processed folder and record where it went.
-- A Run is complete only when the source is archived and the extraction is
-  recorded with its citations and validations. Otherwise escalate to the AP
-  owner.
+- A Run is complete only when the source is archived, the purchase bill exists
+  exactly once in Zoho Books, and the extraction is recorded with its citations
+  and validations. Otherwise escalate to the AP owner.

@@ -63,6 +63,8 @@ Shared vocabulary for this project. A glossary only. No implementation details.
 
 **Purchase Bill** — the bill Verirun creates in the accounting system for a supplier invoice. LedgerLite calls it an invoice.
 
+**Idempotency Key** — the stable key for one side effect, derived from the Run's Step, Tool, and arguments. It is journaled before the call; a retry reconciles the earlier write instead of repeating it.
+
 **GSTIN** — the 15-character Goods and Services Tax identification number of a registered Indian supplier. Its last character is a check digit, so a mistyped GSTIN can be caught before a bill is created.
 
 **Citation** — the exact line of a source document that supports one extracted field. A value without a citation is not reviewable.

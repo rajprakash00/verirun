@@ -72,6 +72,8 @@ class TaskPack(BaseModel):
     approval_rules: list[ApprovalRule] = Field(default_factory=list)
     verification: list[VerificationCheck] = Field(default_factory=list)
     extraction: ExtractionConfig | None = None
+    default_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    requires_purchase_order: bool = False
 
     @field_validator("policies")
     @classmethod

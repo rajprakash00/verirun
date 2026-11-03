@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     zoho_client_secret: SecretStr = SecretStr("")
     zoho_read_refresh_token: SecretStr = SecretStr("")
     zoho_read_token_file: Path = Path("runs/zoho-read-token.enc")
+    zoho_write_refresh_token: SecretStr = SecretStr("")
+    zoho_write_token_file: Path = Path("runs/zoho-write-token.enc")
     zoho_token_key: SecretStr = SecretStr("")
     zoho_api_base_url: str = "https://www.zohoapis.in/books/v3"
     zoho_accounts_domain: str = "https://accounts.zoho.in"

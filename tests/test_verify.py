@@ -11,7 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from mocks.ledgerlite import db as ledgerlite
-from tests.india_fixture import GSTIN, INVOICE_NUMBER, PO_ID, SUPPLIER, TOTAL_PAISE
+from tests.india_fixture import (
+    GSTIN,
+    INVOICE_NUMBER,
+    PDF_FILENAME,
+    PO_ID,
+    SUPPLIER,
+    TOTAL_PAISE,
+    write_invoice_pdf,
+)
 from tests.support import ROOT, ScriptedClient, vision_fields
 from verirun.adapters import (
     Bill,
@@ -907,3 +915,195 @@ def test_a_missing_purchase_order_is_allowed_by_default(tmp_path: Path) -> None:
     )
 
     assert run.state is RunState.COMPLETED
+
+
+def india_bill_pack() -> TaskPack:
+    return TaskPack(
+        id="india-bill-test",
+        goal_template="Verify the purchase bill against its source tax invoice",
+        sop="india-gst-extraction",
+        tools=["erp.file_invoice"],
+        verification=[
+            VerificationCheck(
+                id="bill-filed",
+                description="The bill exists once and matches its source.",
+                check="india_bill_matches",
+            )
+        ],
+    )
+
+
+def seed_bill_claim(store: RunStore, bill: Bill) -> None:
+    arguments = {
+        "number": bill.number,
+        "vendor_id": bill.vendor_id,
+        "amount": bill.amount_cents / 100,
+        "currency": bill.currency,
+        "po_id": bill.po_id,
+    }
+    store.record_action("RUN-0001", "file-1", "erp.file_invoice", arguments)
+    store.complete_action(
+        "RUN-0001",
+        "file-1",
+        {
+            "ok": True,
+            "summary": "Filed the bill",
+            "data": {
+                "invoice_id": bill.id,
+                "number": bill.number,
+                "vendor_id": bill.vendor_id,
+                "amount_cents": bill.amount_cents,
+                "currency": bill.currency,
+                "po_id": bill.po_id,
+            },
+        },
+    )
+
+
+def verified_india_bill(
+    tmp_path: Path, *, source_lines: tuple[str, ...] | None = None
+) -> tuple[RunStore, InMemoryAccountingSystem]:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    accounting = india_accounting()
+    bill = accounting.create_purchase_bill(
+        number=INVOICE_NUMBER,
+        vendor_id="V-IN-1001",
+        amount_cents=TOTAL_PAISE,
+        currency="INR",
+        po_id=PO_ID,
+    )
+    seed_bill_claim(store, bill)
+    write_invoice_pdf(
+        tmp_path / "shared" / "processed" / PDF_FILENAME, lines=source_lines
+    )
+    return store, accounting
+
+
+def test_an_india_bill_is_verified_against_its_source_tax_invoice(
+    tmp_path: Path,
+) -> None:
+    store, accounting = verified_india_bill(tmp_path)
+
+    run = verify_run(
+        "RUN-0001",
+        india_bill_pack(),
+        store,
+        accounting=accounting,
+        shared_root=tmp_path / "shared",
+    )
+
+    assert run.state is RunState.COMPLETED
+    result = store.get_verification("RUN-0001")[0]
+    assert result.ok
+    assert any(item.startswith("erp:") for item in result.evidence)
+    assert f"source:processed/{PDF_FILENAME}" in result.evidence
+    assert f"gstin:{GSTIN}" in result.evidence
+    assert "tax:tax_sum" in result.evidence
+
+
+def test_a_bill_amount_that_differs_from_the_source_fails_the_check(
+    tmp_path: Path,
+) -> None:
+    store, accounting = verified_india_bill(tmp_path)
+    original = accounting.list_bills(number=INVOICE_NUMBER)[0]
+    # Replace the bill with one whose amount disagrees with the source PDF.
+    accounting._bills.clear()
+    accounting._bills[original.id] = Bill(
+        id=original.id,
+        number=original.number,
+        vendor_id=original.vendor_id,
+        po_id=original.po_id,
+        gr_id=None,
+        amount_cents=TOTAL_PAISE - 100,
+        currency="INR",
+        status="received",
+        received_at=CREATED_AT,
+    )
+
+    run = verify_run(
+        "RUN-0001",
+        india_bill_pack(),
+        store,
+        accounting=accounting,
+        shared_root=tmp_path / "shared",
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "amount" in result.detail
+
+
+def test_a_source_with_failing_gst_arithmetic_fails_the_check(
+    tmp_path: Path,
+) -> None:
+    lines = (
+        "TAX INVOICE",
+        f"Supplier: {SUPPLIER}",
+        f"GSTIN: {GSTIN}",
+        f"Invoice number: {INVOICE_NUMBER}",
+        "Invoice date: 05/09/2026",
+        f"Purchase order: {PO_ID}",
+        "Taxable amount: 10,000.00",
+        "CGST 9%: 900.00",
+        "SGST 9%: 900.00",
+        "IGST: 0.00",
+        "Total: 11,850.00 INR",
+    )
+    store, accounting = verified_india_bill(tmp_path, source_lines=lines)
+
+    run = verify_run(
+        "RUN-0001",
+        india_bill_pack(),
+        store,
+        accounting=accounting,
+        shared_root=tmp_path / "shared",
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "invoice total" in result.detail
+
+
+def test_a_duplicate_match_still_fails_after_the_run_created_its_bill(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+    accounting = india_accounting()
+    claimed = accounting.create_purchase_bill(
+        number=INVOICE_NUMBER,
+        vendor_id="V-IN-1001",
+        amount_cents=TOTAL_PAISE,
+        currency="INR",
+        po_id=PO_ID,
+    )
+    seed_bill_claim(store, claimed)
+    other = Bill(
+        id="INV-Z9",
+        number=INVOICE_NUMBER,
+        vendor_id="V-IN-1001",
+        po_id=PO_ID,
+        gr_id=None,
+        amount_cents=TOTAL_PAISE,
+        currency="INR",
+        status="approved",
+        received_at=CREATED_AT,
+    )
+    accounting._bills[other.id] = other
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(),
+        store,
+        accounting=accounting,
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "already" in result.detail

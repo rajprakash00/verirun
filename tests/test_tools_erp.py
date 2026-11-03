@@ -332,6 +332,44 @@ def test_create_vendor_policy_facts_name_the_system(ledgerlite_db: Path) -> None
     assert facts == {"system": "ledgerlite"}
 
 
+def test_file_invoice_policy_facts_cover_amount_vendor_and_purchase_order(
+    ledgerlite_db: Path,
+) -> None:
+    tools = {tool.name: tool for tool in build_erp_tools(MockAccountingSystem(ledgerlite_db))}
+    facts = tools["erp.file_invoice"].policy_facts(
+        {
+            "number": "NW-2026-001",
+            "vendor_id": "V-1001",
+            "amount": 1250.00,
+            "po_id": "PO-2001",
+        }
+    )
+
+    assert facts == {
+        "system": "ledgerlite",
+        "vendor_id": "V-1001",
+        "vendor_matched": True,
+        "vendor_status": "active",
+        "amount_inr": 1250.0,
+        "currency": "USD",
+        "purchase_order_present": True,
+    }
+
+
+def test_file_invoice_policy_facts_mark_an_unmatched_vendor(
+    ledgerlite_db: Path,
+) -> None:
+    tools = {tool.name: tool for tool in build_erp_tools(MockAccountingSystem(ledgerlite_db))}
+
+    facts = tools["erp.file_invoice"].policy_facts(
+        {"number": "NW-2026-001", "vendor_id": "V-9999", "amount": 10}
+    )
+
+    assert facts["vendor_matched"] is False
+    assert facts["vendor_status"] == "unmatched"
+    assert facts["purchase_order_present"] is False
+
+
 def test_mutating_erp_tools_are_journaled_side_effects(ledgerlite_db: Path) -> None:
     tools = {tool.name: tool for tool in build_erp_tools(MockAccountingSystem(ledgerlite_db))}
 
@@ -348,5 +386,5 @@ def test_scheduling_a_payment_is_marked_irreversible(ledgerlite_db: Path) -> Non
 
     assert tools["erp.schedule_payment"].irreversible
     assert tools["erp.create_vendor"].irreversible
-    assert not tools["erp.file_invoice"].irreversible
+    assert tools["erp.file_invoice"].irreversible
     assert not tools["erp.get_invoice"].irreversible

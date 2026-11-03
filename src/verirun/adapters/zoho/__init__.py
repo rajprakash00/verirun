@@ -1,4 +1,4 @@
-"""The Zoho Books integration: OAuth tokens and a read-only accounting adapter."""
+"""The Zoho Books integration: OAuth tokens, reads, and purchase-bill writes."""
 
 from verirun.adapters.zoho.client import ZohoBooksClient
 from verirun.adapters.zoho.reads import ZohoAccountingReads, ZohoAccountingSystem

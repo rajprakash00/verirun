@@ -37,8 +37,10 @@ def zoho_settings(tmp_path: Path, **overrides) -> Settings:
         "zoho_client_id": "client-id",
         "zoho_client_secret": "client-secret",
         "zoho_read_refresh_token": "refresh-token",
+        "zoho_write_refresh_token": "write-refresh-token",
         "zoho_token_key": "operator-secret",
         "zoho_read_token_file": tmp_path / "zoho-read-token.enc",
+        "zoho_write_token_file": tmp_path / "zoho-write-token.enc",
     }
     values.update(overrides)
     return settings(tmp_path, **values)
@@ -109,6 +111,7 @@ def test_zoho_reads_replace_the_mock_accounting_when_configured(
     assert isinstance(backends.accounting, ZohoAccountingSystem)
     assert backends.verifier_accounting is backends.reads
     assert backends.verifier_accounting is not backends.accounting
+    assert backends.reads.client is not backends.accounting.client
     assert "client-secret" not in repr(zoho_settings(tmp_path))
 
 
@@ -141,5 +144,12 @@ def test_a_partial_zoho_configuration_is_rejected(tmp_path: Path) -> None:
 def test_zoho_without_a_token_or_file_is_rejected(tmp_path: Path) -> None:
     chosen = zoho_settings(tmp_path, zoho_read_refresh_token="")
 
-    with pytest.raises(ValueError, match="REFRESH_TOKEN"):
+    with pytest.raises(ValueError, match="READ_REFRESH_TOKEN"):
+        Backends.from_settings(chosen)
+
+
+def test_zoho_without_a_write_token_or_file_is_rejected(tmp_path: Path) -> None:
+    chosen = zoho_settings(tmp_path, zoho_write_refresh_token="")
+
+    with pytest.raises(ValueError, match="WRITE_REFRESH_TOKEN"):
         Backends.from_settings(chosen)

@@ -13,7 +13,8 @@ from failures, stops at **Approval Gates** before irreversible actions, and
 **verifies the outcome against ground truth** before calling it done.
 
 One unchanged engine runs two Mock Suite Task Packs — invoice processing and
-vendor onboarding — and a Phase 1 India GST extraction pack. The demo is
+vendor onboarding — and a Phase 1 India AP pack that extracts GST fields and
+creates a Zoho Books purchase bill after any required approval. The demo is
 offline, deterministic, and needs no API key.
 
 - Product spec: [`SPEC.md`](SPEC.md)
@@ -168,29 +169,37 @@ reprocess an ingested message. `invoice.extract` reads an India GST text-layer
 PDF with a confidence and citation per field, and records GSTIN and tax
 validations in the Evidence Pack. The India Task Pack's Verifier matches the
 extraction to the accounting system's vendor, duplicate bills, and purchase
-orders; GST verification checks and INR approval rules are the next Phase 1
-tickets.
+orders, then checks the created bill against the source PDF: existence, vendor
+and GSTIN, invoice number, amount, tax arithmetic, purchase order, and source
+document. The India policy parks bills above 10,000 INR, unmatched vendors,
+missing required purchase orders, and low-confidence extractions at an Approval
+Gate. An inactive vendor is a policy denial, not a gate.
 
-### Zoho Books read-only matching (Phase 1)
+### Zoho Books write path (Phase 1)
 
 Setting the Zoho Books settings below swaps the accounting adapter from
-LedgerLite to Zoho Books India. The token is read-only; the Verifier gets its
-own `AccountingReads` object with no write method, and no bill is created on
-this path. The write path will get a separate write token.
+LedgerLite to Zoho Books India. The Verifier keeps a read-only
+`AccountingReads` object; the executor gets a separate write token and creates
+exactly one purchase bill after any required approval. The idempotency key is
+journaled before the call and written into the bill's reference number, so a
+retry reconciles the earlier write instead of creating a duplicate. A
+network or 5xx outcome that cannot be reconciled parks for a human; the
+adapter never blindly retries a write.
 
 | Setting | Purpose |
 | --- | --- |
 | `VERIRUN_ZOHO_ORGANIZATION_ID` | The Zoho Books India organisation id. |
 | `VERIRUN_ZOHO_CLIENT_ID`, `_CLIENT_SECRET` | A Self Client from the Zoho API console (India DC). |
-| `VERIRUN_ZOHO_READ_REFRESH_TOKEN` | A refresh token with `ZohoBooks.contacts.READ`, `ZohoBooks.purchaseorders.READ`, `ZohoBooks.bills.READ`, and `ZohoBooks.vendorpayments.READ`. |
-| `VERIRUN_ZOHO_TOKEN_KEY` | Operator secret used to encrypt the token file at rest. |
-| `VERIRUN_ZOHO_READ_TOKEN_FILE` | Encrypted token cache (default `runs/zoho-read-token.enc`). |
+| `VERIRUN_ZOHO_READ_REFRESH_TOKEN` | A read-only refresh token with `ZohoBooks.contacts.READ`, `ZohoBooks.purchaseorders.READ`, `ZohoBooks.bills.READ`, and `ZohoBooks.vendorpayments.READ`. |
+| `VERIRUN_ZOHO_WRITE_REFRESH_TOKEN` | A separate write refresh token with the matching `.CREATE` scope plus the reads the executor needs. |
+| `VERIRUN_ZOHO_TOKEN_KEY` | Operator secret used to encrypt both token files at rest. |
+| `VERIRUN_ZOHO_READ_TOKEN_FILE`, `_WRITE_TOKEN_FILE` | Encrypted token caches (default `runs/zoho-read-token.enc` and `runs/zoho-write-token.enc`). |
 | `VERIRUN_ZOHO_ACCOUNTS_DOMAIN`, `_API_BASE_URL` | Default `https://accounts.zoho.in` and `https://www.zohoapis.in/books/v3`. |
 
-Zoho creates the refresh token once; Verirun refreshes the short-lived access
-token and writes both to the encrypted token file. If the file exists, the
-refresh token can be removed from the environment. A partial Zoho configuration
-is an error rather than a silent fallback to LedgerLite.
+Zoho creates each refresh token once; Verirun refreshes the short-lived access
+tokens and writes them to the encrypted files. If a file exists, its refresh
+token can be removed from the environment. A partial Zoho configuration is an
+error rather than a silent fallback to LedgerLite.
 
 The recorded-fixture contract lives in `tests/test_zoho_client.py`,
 `tests/test_zoho_reads.py`, and `tests/test_zoho_e2e.py`. To check a real trial
@@ -200,11 +209,10 @@ before a pilot, export the same settings and run:
 VERIRUN_ZOHO_LIVE=1 uv run pytest tests/test_zoho_live.py
 ```
 
-To run the same read-only match end to end against the configured trial (no
-purchase bill is created):
+To run the match-and-create path end to end against the configured trial:
 
 ```bash
-uv run verirun run "Match the GST invoice in the AP mailbox" \
+uv run verirun run "Process the GST invoice in the AP mailbox" \
   --task invoice-processing-in
 ```
 
@@ -216,8 +224,10 @@ uv run verirun serve                        # http://127.0.0.1:8000
 ```
 
 The dashboard lists Runs and shows the Work Order, the Plan, a live timeline of
-steps and tool calls, the approval queue, and the verification results.
-Approving an over-limit payment resumes the parked Run; rejecting aborts it with
+steps and tool calls, the approval queue, and the verification results. The
+approval review shows the source invoice, the extraction with citations, the
+GST validations, and the proposed purchase bill.
+Approving an over-limit payment or bill resumes the parked Run; rejecting aborts it with
 the recorded reason. A timeout never auto-approves.
 
 Browser Steps in a live `run`, a dashboard-resumed Run, or the demo drive pages
@@ -355,6 +365,8 @@ Each decision and its trade-offs is recorded as an ADR in
 | [0006](docs/adr/0006-eval-only-ablations.md) | Eval-only switches disable the Verifier or the Approval Gates; the harness reports caught vs undetected failures and gated vs ungated irreversible actions. |
 | [0007](docs/adr/0007-mail-and-accounting-adapters.md) | `MailSource` and `AccountingSystem` adapters separate the engine from MailDesk and LedgerLite; the Verifier gets read-only accounting access, and an in-memory fake backs engine tests. |
 | [0008](docs/adr/0008-india-gst-extraction.md) | IMAP and watched-folder sources ingest into a content-addressed index; India GST extraction returns a confidence and a verified citation per field, with deterministic GSTIN and tax validations in the Evidence Pack. |
+| [0009](docs/adr/0009-zoho-read-only-verifier.md) | Zoho Books reads use an encrypted OAuth token; the Verifier gets a separate read-only object and pre-write vendor, duplicate, and purchase-order matching. |
+| [0010](docs/adr/0010-zoho-write-and-approval.md) | Purchase bills are created through a separate write token, journaled idempotency keys, and reconcile-before-retry; INR, vendor, purchase-order, and confidence facts drive the Approval Gate, and the Verifier re-reads the source PDF. |
 
 ### Models and APIs
 
@@ -397,14 +409,14 @@ the Company Context change.
 
 What is not built:
 
-- **Zoho Books write path and the India verification contract.** The product
-  path can ingest an AP mailbox over IMAP or a watched folder, extract India GST
-  fields with validations, match the invoice to a Zoho Books vendor and purchase
-  order through a read-only OAuth token, detect duplicate bills, and archive the
-  source. Creating the purchase bill, the remaining GST verification checks,
-  and the INR approval rules land with the write-path ticket. MailDesk,
-  LedgerLite, and the shared file tree remain the offline fixtures; payments are
-  scheduled, not transferred; no email is sent.
+- **Live Zoho Books and IMAP trials.** The product path is tested against
+  recorded Zoho Books responses and a local IMAP fixture, not a live trial in
+  CI. It ingests an AP mailbox over IMAP or a watched folder, extracts India GST
+  fields with validations, matches the vendor and purchase order through a
+  read-only token, creates one purchase bill through a separate write token
+  after any required approval, verifies the bill against the source PDF, and
+  archives the source. MailDesk, LedgerLite, and the shared file tree remain the
+  offline fixtures; payments are scheduled, not transferred; no email is sent.
 - **Authentication, authorization, multi-tenancy, or cloud deployment.** The
   dashboard binds to localhost and has no login or tenant boundary.
 - **A queue, scheduler, or parallel execution.** One process runs one Request at

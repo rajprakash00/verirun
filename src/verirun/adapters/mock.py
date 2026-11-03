@@ -291,7 +291,9 @@ class MockAccountingSystem(AccountingSystem):
         currency: str = "USD",
         po_id: str | None = None,
         gr_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Bill:
+        del idempotency_key  # the Mock Suite journal already guards its writes
         require_positive_amount(amount_cents)
         po_id = po_id or None
         gr_id = gr_id or None

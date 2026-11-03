@@ -52,6 +52,19 @@ class TransientError(AdapterError):
     kind = "transient"
 
 
+class WriteOutcomeUnknownError(AdapterError):
+    """A write may or may not have landed; never retry it blindly.
+
+    The adapter reconciles against the natural key first. If it still cannot
+    tell, the Run must park for a human instead of repeating the write.
+    """
+
+    kind = "unknown"
+
+    def __init__(self, message: str, data: dict[str, Any] | None = None) -> None:
+        super().__init__(message, {**(data or {}), "write_outcome": "unknown"})
+
+
 class UnsupportedError(AdapterError):
     """This adapter does not provide the requested capability."""
 
@@ -196,9 +209,15 @@ class Bill:
     status: str
     received_at: str
     scenario: str = ""
+    reference: str = ""
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        # Keep the observation shape the Mock Suite always had; a product
+        # adapter that records an idempotency marker adds it.
+        if not data["reference"]:
+            data.pop("reference")
+        return data
 
 
 @dataclass(frozen=True)
@@ -346,8 +365,14 @@ class AccountingSystem(AccountingReads, ABC):
         currency: str = "USD",
         po_id: str | None = None,
         gr_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> Bill:
-        """Create one bill, rejecting duplicates and reference mismatches."""
+        """Create one bill, rejecting duplicates and reference mismatches.
+
+        ``idempotency_key`` is the Run's stable key for this side effect. An
+        adapter that can store it must use it to recognise its own earlier
+        write; an adapter without such a store may ignore it.
+        """
 
     def create_vendor(
         self, *, name: str, tax_id: str, email: str, address: str

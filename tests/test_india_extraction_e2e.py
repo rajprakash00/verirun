@@ -33,7 +33,8 @@ from verirun.adapters import (
 from verirun.config import Settings
 from verirun.context.company import load_company_context
 from verirun.context.task_pack import load_task_pack
-from verirun.engine.orchestrator import run_task
+from verirun.engine.approve import approve
+from verirun.engine.orchestrator import resume_run, run_task
 from verirun.engine.states import RunState
 from verirun.runs.store import RunStore
 from verirun.runtime import Backends, build_registry
@@ -45,10 +46,32 @@ WORK_ORDER = {
     "goal": "Extract the GST invoice and archive its source",
     "assumptions": ["The AP mailbox is the source of truth"],
     "systems": ["maildesk", "ledgerlite", "files"],
-    "policies": [],
-    "approval_gates": [],
+    "policies": ["india-ap"],
+    "approval_gates": [
+        {
+            "id": "bill-approval-threshold",
+            "description": "A purchase bill above 10,000 INR waits for a human",
+            "policy": "india-ap",
+        },
+        {
+            "id": "missing-purchase-order-needs-approval",
+            "description": "A bill without its purchase order waits for a human",
+            "policy": "india-ap",
+        },
+        {
+            "id": "low-confidence-extraction-needs-approval",
+            "description": "A low-confidence extraction waits for a human",
+            "policy": "india-ap",
+        },
+        {
+            "id": "unmatched-vendor-needs-approval",
+            "description": "A bill for an unmatched vendor waits for a human",
+            "policy": "india-ap",
+        },
+    ],
     "success_criteria": [
         "The invoice fields are extracted with citations and GST validations",
+        "Exactly one purchase bill exists in the accounting system",
         "The source invoice is archived in processed",
     ],
     "open_questions": [],
@@ -73,6 +96,12 @@ PLAN = {
         },
         {
             "id": "step-3",
+            "goal": "Create the purchase bill after approval",
+            "allowed_tools": ["erp.file_invoice"],
+            "done_criterion": "Exactly one purchase bill exists",
+        },
+        {
+            "id": "step-4",
             "goal": "Archive the source invoice",
             "allowed_tools": ["files.archive"],
             "done_criterion": "The source is in processed",
@@ -109,6 +138,13 @@ def accounting_fake() -> InMemoryAccountingSystem:
             )
         ],
     )
+
+
+def accounting_bills(accounting: InMemoryAccountingSystem) -> list[tuple]:
+    return [
+        (bill.number, bill.vendor_id, bill.amount_cents, bill.currency, bill.po_id)
+        for bill in accounting.list_bills()
+    ]
 
 
 def settings(tmp_path: Path) -> Settings:
@@ -158,9 +194,22 @@ def test_fixture_mailbox_becomes_a_verified_evidence_pack(tmp_path: Path) -> Non
                 tool_turn("erp.get_purchase_order", {"po_id": PO_ID}, call_id="c5"),
                 text_turn("The supplier GSTIN and purchase order match."),
                 tool_turn(
+                    "erp.file_invoice",
+                    {
+                        "number": INVOICE_NUMBER,
+                        "vendor_id": "V-IN-1001",
+                        "amount": 11800.00,
+                        "currency": "INR",
+                        "po_id": PO_ID,
+                    },
+                    call_id="c6",
+                ),
+                # Consumed after the human approves the prepared bill.
+                text_turn("Created the purchase bill after approval."),
+                tool_turn(
                     "files.archive",
                     {"path": attachment.path, "directory": "processed"},
-                    call_id="c6",
+                    call_id="c7",
                 ),
                 text_turn("Archived the source invoice."),
             ]
@@ -184,6 +233,24 @@ def test_fixture_mailbox_becomes_a_verified_evidence_pack(tmp_path: Path) -> Non
             evidence_root=chosen.run_db.parent,
             run_id="RUN-IN-0001",
         )
+        assert run.state is RunState.AWAITING_APPROVAL
+        request = store.open_approval(run.id)
+        assert request is not None
+        assert request.rule == "bill-approval-threshold"
+        assert request.arguments["number"] == INVOICE_NUMBER
+        assert accounting_bills(backends.accounting) == []
+
+        approve(store, request.id)
+        run = resume_run(
+            run.id,
+            pack,
+            script,
+            store,
+            registry,
+            accounting=backends.verifier_accounting,
+            shared_root=source.document_root,
+            evidence_root=chosen.run_db.parent,
+        )
 
     assert run.state is RunState.COMPLETED, run.error
     evidence = json.loads(
@@ -193,9 +260,20 @@ def test_fixture_mailbox_becomes_a_verified_evidence_pack(tmp_path: Path) -> Non
     assert evidence["result"] == "verified"
     assert evidence["verification"]["passed"] is True
     assert [check["id"] for check in evidence["verification"]["checks"]] == [
-        "source-archived",
+        "bill-filed",
         "accounting-invoice-matches",
+        "source-archived",
     ]
+    assert accounting_bills(backends.accounting) == [
+        (INVOICE_NUMBER, "V-IN-1001", TOTAL_PAISE, "INR", PO_ID)
+    ]
+    assert evidence["approvals"][0]["status"] == "approved"
+    assert evidence["approvals"][0]["executed_at"] is not None
+    write = next(
+        item for item in evidence["action_log"] if item["action"] == "erp.file_invoice"
+    )
+    assert write["status"] == "done"
+    assert write["key"].startswith("step-3:erp.file_invoice:")
 
     source_record = evidence["sources"][0]
     assert source_record["message_id"] == summary.id

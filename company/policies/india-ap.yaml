@@ -1,0 +1,66 @@
+id: india-ap
+title: India AP purchase bills
+description: >-
+  Rules for creating a purchase bill in Zoho Books from a supplier tax invoice.
+  A bill is irreversible once Zoho Books records it, so the risky cases are
+  prepared and held for a human decision. A blocked vendor is a denial, never a
+  gate.
+rules:
+  - id: bill-approval-threshold
+    description: >-
+      A purchase bill above 10,000.00 INR must be prepared, then held at an
+      approval gate until a human approves it. Timeouts never auto-approve.
+    effect: require_approval
+    actions:
+      - bill.create
+    when:
+      - field: amount_inr
+        op: gt
+        value: 10000
+  - id: unmatched-vendor-needs-approval
+    description: >-
+      A bill against a vendor that does not resolve to exactly one Zoho Books
+      vendor must be approved by a human before it is created.
+    effect: require_approval
+    actions:
+      - bill.create
+    when:
+      - field: vendor_matched
+        op: eq
+        value: false
+  - id: missing-purchase-order-needs-approval
+    description: >-
+      When the Task Pack requires a purchase order, a bill without one must be
+      approved by a human before it is created.
+    effect: require_approval
+    actions:
+      - bill.create
+    when:
+      - field: purchase_order_required
+        op: eq
+        value: true
+      - field: purchase_order_present
+        op: eq
+        value: false
+  - id: low-confidence-extraction-needs-approval
+    description: >-
+      A bill from an extraction below the Task Pack confidence threshold must be
+      approved by a human before it is created.
+    effect: require_approval
+    actions:
+      - bill.create
+    when:
+      - field: extraction_below_threshold
+        op: eq
+        value: true
+  - id: no-bill-for-inactive-vendor
+    description: >-
+      A bill for an inactive vendor is forbidden. This is a policy denial, not
+      an approval gate.
+    effect: forbid
+    actions:
+      - bill.create
+    when:
+      - field: vendor_status
+        op: eq
+        value: inactive

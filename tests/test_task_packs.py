@@ -263,13 +263,24 @@ def test_shipped_india_pack_is_valid() -> None:
     assert pack.id == "invoice-processing-in"
     assert pack.sop in context.sops
     assert "invoice.extract" in pack.tools
+    assert "erp.file_invoice" in pack.tools
     assert "files.extract" not in pack.tools
     assert pack.extraction is not None
     assert pack.extraction.confidence_threshold == 0.8
+    assert pack.default_currency == "INR"
+    assert pack.requires_purchase_order is True
     assert [check.id for check in pack.verification] == [
-        "source-archived",
+        "bill-filed",
         "accounting-invoice-matches",
+        "source-archived",
     ]
+    assert {rule.id for rule in pack.approval_rules} == {
+        "bill-approval-threshold",
+        "unmatched-vendor-needs-approval",
+        "missing-purchase-order-needs-approval",
+        "low-confidence-extraction-needs-approval",
+        "no-bill-for-inactive-vendor",
+    }
     for policy in pack.policies:
         assert policy in context.policies
 

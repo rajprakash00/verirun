@@ -15,15 +15,19 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from mocks.ledgerlite import db as ledgerlite
+from tests.india_fixture import GSTIN, INVOICE_NUMBER, PDF_FILENAME, SUPPLIER
 from tests.support import (
+    ROOT,
     WORK_ORDER,
     ScriptedClient,
     park_over_limit_run,
     run_settings,
     tool_turn,
 )
+from verirun.config import Settings
 from verirun.context.company import load_company_context
 from verirun.context.task_pack import load_task_pack
+from verirun.engine.models import Observation
 from verirun.engine.orchestrator import run_task
 from verirun.engine.states import RunState
 from verirun.runs.store import RunStore
@@ -251,6 +255,145 @@ def test_an_escalated_run_shows_its_question_on_the_page(
     assert "Escalation" in page.text
     assert "Invoice BP-2026-123 has no purchase order in LedgerLite" in page.text
     assert "Which purchase order covers BP-2026-123?" in page.text
+
+
+def seed_india_approval(tmp_path: Path) -> Settings:
+    settings = Settings(
+        _env_file=None,
+        company_dir=ROOT / "company",
+        tasks_dir=ROOT / "tasks",
+        run_db=tmp_path / "runs" / "verirun.db",
+        shared_dir=tmp_path / "shared",
+    )
+    store = RunStore(settings.run_db)
+    run_id = "RUN-IN-UI"
+    store.create_run(
+        "Process the tax invoice in the AP mailbox",
+        "invoice-processing-in",
+        run_id=run_id,
+    )
+    for target in (RunState.RESOLVING, RunState.PLANNED, RunState.EXECUTING):
+        store.transition(run_id, target)
+    store.add_observation(
+        run_id,
+        Observation(
+            ok=True,
+            summary="Read the invoice email",
+            data={
+                "id": "MSG-1",
+                "folder": "inbox",
+                "sender": "Paper Trail Accounts",
+                "sender_email": "accounts@papertrail.example",
+                "subject": f"Tax invoice {INVOICE_NUMBER} from {SUPPLIER}",
+                "attachments": [
+                    {
+                        "id": "sha256:abc",
+                        "filename": PDF_FILENAME,
+                        "path": f"attachments/abc/{PDF_FILENAME}",
+                    }
+                ],
+            },
+        ),
+        tool="mail.read",
+    )
+    store.add_observation(
+        run_id,
+        Observation(
+            ok=True,
+            summary="Extracted the invoice with citations",
+            data={
+                "path": f"attachments/abc/{PDF_FILENAME}",
+                "min_confidence": 0.95,
+                "threshold": 0.8,
+                "low_confidence": False,
+                "fields": {
+                    "supplier_name": {
+                        "value": SUPPLIER,
+                        "confidence": 0.98,
+                        "citation": f"Supplier: {SUPPLIER}",
+                    },
+                    "supplier_gstin": {
+                        "value": GSTIN,
+                        "confidence": 0.99,
+                        "citation": f"GSTIN: {GSTIN}",
+                    },
+                    "invoice_number": {
+                        "value": INVOICE_NUMBER,
+                        "confidence": 0.99,
+                        "citation": f"Invoice number: {INVOICE_NUMBER}",
+                    },
+                    "total_paise": {
+                        "value": 1_180_000,
+                        "confidence": 0.98,
+                        "citation": "Total: 11,800.00 INR",
+                    },
+                    "currency": {
+                        "value": "INR",
+                        "confidence": 0.99,
+                        "citation": "Total: 11,800.00 INR",
+                    },
+                },
+                "validations": [
+                    {
+                        "id": "gstin_checksum",
+                        "ok": True,
+                        "detail": f"GSTIN {GSTIN} is well formed",
+                    },
+                    {
+                        "id": "tax_sum",
+                        "ok": True,
+                        "detail": "taxable 10,000.00 INR + SGST 900.00 INR = 11,800.00 INR",
+                    },
+                ],
+            },
+        ),
+        tool="invoice.extract",
+    )
+    store.create_approval(
+        run_id,
+        key="step-3:erp.file_invoice:abc",
+        step_position=2,
+        step_id="step-3",
+        tool="erp.file_invoice",
+        action="bill.create",
+        arguments={
+            "number": INVOICE_NUMBER,
+            "vendor_id": "V-IN-1001",
+            "amount": 11800.00,
+            "currency": "INR",
+            "po_id": "PO-IN-2001",
+        },
+        policy="india-ap",
+        rule="bill-approval-threshold",
+        reason="A purchase bill above 10,000.00 INR must be approved by a human",
+    )
+    store.transition(run_id, RunState.AWAITING_APPROVAL)
+    return settings
+
+
+def test_the_approval_review_shows_the_source_extraction_and_proposed_bill(
+    tmp_path: Path,
+) -> None:
+    settings = seed_india_approval(tmp_path)
+    client = TestClient(create_app(settings))
+
+    queue = client.get("/approvals")
+    run_page = client.get("/runs/RUN-IN-UI")
+
+    for page in (queue, run_page):
+        assert page.status_code == 200
+        assert f"Tax invoice {INVOICE_NUMBER} from {SUPPLIER}" in page.text
+        assert PDF_FILENAME in page.text
+        assert SUPPLIER in page.text
+        assert GSTIN in page.text
+        assert INVOICE_NUMBER in page.text
+        assert "GST validations" in page.text
+        assert "gstin_checksum" in page.text
+        assert "Proposed purchase bill" in page.text
+        assert "11800.0" in page.text
+        assert "PO-IN-2001" in page.text
+        assert "Approve" in page.text
+        assert "Reject" in page.text
 
 
 def test_unknown_runs_and_approvals_return_404(

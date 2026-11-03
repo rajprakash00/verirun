@@ -15,7 +15,12 @@ from typing import Any
 
 import httpx
 
-from verirun.adapters.base import ConflictError, NotFoundError, TransientError
+from verirun.adapters.base import (
+    ConflictError,
+    NotFoundError,
+    TransientError,
+    WriteOutcomeUnknownError,
+)
 from verirun.adapters.zoho.retry import backoff, retry_after
 from verirun.adapters.zoho.tokens import ZohoTokenManager
 
@@ -95,6 +100,65 @@ class ZohoBooksClient:
                 raise ConflictError(_error_message(response, path))
             return self._payload(response, path)
         raise TransientError(last_error)
+
+    def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        """One state-changing POST.
+
+        A rate-limited request is safe to retry because Zoho rejected it. A
+        network error, 5xx, or timeout after the request left Verirun is an
+        unknown outcome: the caller must reconcile against the system of record
+        rather than repeat the write. The token is refreshed once on 401.
+        """
+        url = f"{self.base_url}/{path.lstrip('/')}"
+        query = {"organization_id": self.organization_id}
+        refreshed = False
+        forced_token: str | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            if forced_token is not None:
+                token = forced_token
+                forced_token = None
+            else:
+                token = self.token_manager.access_token()
+            headers = {
+                "Authorization": f"Zoho-oauthtoken {token}",
+                "Accept": "application/json",
+            }
+            try:
+                response = self._http.post(url, params=query, json=body, headers=headers)
+            except httpx.HTTPError as exc:
+                raise WriteOutcomeUnknownError(
+                    f"Zoho Books may not have received the write to {path}: "
+                    f"{type(exc).__name__}",
+                    data={"path": path},
+                ) from exc
+            if response.status_code == 401 and not refreshed:
+                refreshed = True
+                forced_token = self.token_manager.access_token(force=True)
+                continue
+            if response.status_code == 401:
+                raise ConflictError(
+                    "Zoho Books rejected the access token after a refresh; "
+                    "reconnect the Zoho OAuth application"
+                )
+            if response.status_code == 429:
+                if attempt == self.max_attempts:
+                    raise TransientError(
+                        f"Zoho Books rate limited the write to {path}; retry later"
+                    )
+                self._sleep(retry_after(response) or backoff(attempt))
+                continue
+            if response.status_code >= 500:
+                raise WriteOutcomeUnknownError(
+                    f"Zoho Books returned HTTP {response.status_code} for the write "
+                    f"to {path}",
+                    data={"path": path, "http_status": response.status_code},
+                )
+            if response.status_code == 404:
+                raise NotFoundError(_error_message(response, path))
+            if response.status_code >= 400:
+                raise ConflictError(_error_message(response, path))
+            return self._payload(response, path)
+        raise TransientError(f"no write to {path} was attempted")
 
     def get_all(
         self, path: str, key: str, params: dict[str, Any] | None = None

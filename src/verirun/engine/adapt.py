@@ -153,4 +153,14 @@ def _terminal_failure(observation: Observation) -> FailureDecision | None:
             ),
             context=data,
         )
+    if data.get("write_outcome") == "unknown":
+        return FailureDecision(
+            FailureAction.ESCALATE,
+            reason=f"unknown write outcome: {observation.summary}",
+            question=(
+                f"{observation.summary}. Check the accounting system before "
+                "resuming; Verirun will not retry this write by itself."
+            ),
+            context=data,
+        )
     return None

@@ -70,7 +70,7 @@ def test_extraction_returns_every_field_with_confidence_and_citation(
     assert data["parsed"]["invoice_number"] == "PTS/2026/0142"
 
 
-def test_a_field_below_the_threshold_is_a_low_confidence_failure(
+def test_a_field_below_the_threshold_is_flagged_for_the_approval_gate(
     tmp_path: Path,
 ) -> None:
     payload = extraction_payload()
@@ -79,8 +79,7 @@ def test_a_field_below_the_threshold_is_a_low_confidence_failure(
 
     observation = extractor.invoke({"path": PATH})
 
-    assert not observation.ok
-    assert observation.error_kind == "invalid"
+    assert observation.ok
     assert "below the confidence threshold" in observation.summary
     assert observation.data["low_confidence"] is True
     assert observation.data["low_confidence_fields"] == ["total"]

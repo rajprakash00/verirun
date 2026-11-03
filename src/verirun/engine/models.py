@@ -14,6 +14,11 @@ ErrorKind = Literal[
     "ambiguity",
 ]
 
+# The engine injects the Run's stable action key into a side-effect tool call.
+# Tools never expose it to the model; adapters that can store it use it to
+# recognise their own earlier write.
+IDEMPOTENCY_KEY_ARG = "_idempotency_key"
+
 
 class Step(BaseModel):
     """One piece of work inside a plan."""

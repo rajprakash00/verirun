@@ -170,6 +170,138 @@ def test_invalid_effect_is_rejected() -> None:
         PolicyRule(id="x", description="x", effect="maybe")
 
 
+def test_subset_keeps_only_the_task_pack_policies() -> None:
+    subset = POLICIES.subset(["action-rules"])
+
+    assert subset.ids() == ["action-rules"]
+    assert subset.evaluate(
+        "payment.schedule",
+        {"amount_usd": 999999, "vendor_status": "active", "system": "ledgerlite"},
+    ).outcome == "allow"
+    with pytest.raises(PolicyEvaluationError, match="unknown policies"):
+        POLICIES.subset(["nope"])
+
+
+@pytest.mark.parametrize(
+    ("facts", "outcome", "rule_id"),
+    [
+        pytest.param(
+            {
+                "amount_inr": 10000,
+                "vendor_matched": True,
+                "vendor_status": "active",
+                "purchase_order_required": True,
+                "purchase_order_present": True,
+                "extraction_below_threshold": False,
+                "system": "zoho_books",
+            },
+            "allow",
+            None,
+            id="at-threshold-and-matched",
+        ),
+        pytest.param(
+            {
+                "amount_inr": 10000.01,
+                "vendor_matched": True,
+                "vendor_status": "active",
+                "purchase_order_required": True,
+                "purchase_order_present": True,
+                "extraction_below_threshold": False,
+                "system": "zoho_books",
+            },
+            "require_approval",
+            "bill-approval-threshold",
+            id="above-threshold",
+        ),
+        pytest.param(
+            {
+                "amount_inr": 100,
+                "vendor_matched": False,
+                "vendor_status": "unmatched",
+                "purchase_order_required": True,
+                "purchase_order_present": True,
+                "extraction_below_threshold": False,
+                "system": "zoho_books",
+            },
+            "require_approval",
+            "unmatched-vendor-needs-approval",
+            id="unmatched-vendor",
+        ),
+        pytest.param(
+            {
+                "amount_inr": 100,
+                "vendor_matched": True,
+                "vendor_status": "active",
+                "purchase_order_required": True,
+                "purchase_order_present": False,
+                "extraction_below_threshold": False,
+                "system": "zoho_books",
+            },
+            "require_approval",
+            "missing-purchase-order-needs-approval",
+            id="missing-required-purchase-order",
+        ),
+        pytest.param(
+            {
+                "amount_inr": 100,
+                "vendor_matched": True,
+                "vendor_status": "active",
+                "purchase_order_required": False,
+                "purchase_order_present": False,
+                "extraction_below_threshold": False,
+                "system": "zoho_books",
+            },
+            "allow",
+            None,
+            id="purchase-order-not-required",
+        ),
+        pytest.param(
+            {
+                "amount_inr": 100,
+                "vendor_matched": True,
+                "vendor_status": "active",
+                "purchase_order_required": True,
+                "purchase_order_present": True,
+                "extraction_below_threshold": True,
+                "system": "zoho_books",
+            },
+            "require_approval",
+            "low-confidence-extraction-needs-approval",
+            id="low-confidence",
+        ),
+        pytest.param(
+            {
+                "amount_inr": 100,
+                "vendor_matched": True,
+                "vendor_status": "inactive",
+                "purchase_order_required": True,
+                "purchase_order_present": True,
+                "extraction_below_threshold": False,
+                "system": "zoho_books",
+            },
+            "forbid",
+            "no-bill-for-inactive-vendor",
+            id="inactive-vendor-is-denied",
+        ),
+    ],
+)
+def test_the_india_ap_policy_gates_bill_creation(
+    facts: dict, outcome: str, rule_id: str | None
+) -> None:
+    from pathlib import Path
+
+    from verirun.context.company import load_company_context
+
+    root = Path(__file__).resolve().parents[1]
+    context = load_company_context(root / "company")
+    india = context.policies.subset(["india-ap"])
+
+    decision = india.evaluate("bill.create", facts)
+
+    assert decision.outcome == outcome
+    assert decision.rule == rule_id
+
+
 def test_all_condition_operators() -> None:
     facts = {"n": 5, "name": "alpha", "tags": ["a", "b"]}
     cases = [
