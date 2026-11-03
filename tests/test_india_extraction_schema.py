@@ -254,4 +254,5 @@ def test_parsed_invoice_is_what_matching_and_verification_compare() -> None:
         "invoice_date": "2026-09-05",
         "total_paise": 1_180_000,
         "currency": "INR",
+        "po_reference": "PO-IN-2001",
     }

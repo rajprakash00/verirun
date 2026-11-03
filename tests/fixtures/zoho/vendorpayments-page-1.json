@@ -1,0 +1,19 @@
+{
+  "code": 0,
+  "message": "success",
+  "page_context": {
+    "page": 1,
+    "per_page": 200,
+    "has_more_page": false,
+    "report_name": "VendorPayments"
+  },
+  "vendorpayments": [
+    {
+      "payment_id": "4600000000301",
+      "amount": "5000.00",
+      "currency_code": "INR",
+      "date": "2026-08-10",
+      "status": "paid"
+    }
+  ]
+}

@@ -26,7 +26,8 @@ from verirun.adapters import (
     PurchaseOrder,
     Vendor,
 )
-from verirun.context.task_pack import TaskPack
+from verirun.adapters.matching import gstin_key, name_key, reference_key
+from verirun.context.task_pack import INVOICE_EXTRACT_TOOL, TaskPack
 from verirun.engine.models import CheckResult
 from verirun.engine.states import RunState
 from verirun.llm.client import LLMClient
@@ -118,6 +119,13 @@ def _purchase_order(context: VerificationContext, po_id: str) -> PurchaseOrder |
         return context.accounting.get_purchase_order(po_id)
     except NotFoundError:
         return None
+
+
+def _purchase_orders(context: VerificationContext, **filters: str) -> list[PurchaseOrder]:
+    try:
+        return context.accounting.list_purchase_orders(**filters)
+    except NotFoundError:
+        return []
 
 
 def _goods_receipt(context: VerificationContext, gr_id: str) -> GoodsReceipt | None:
@@ -340,6 +348,153 @@ def check_erp_payment_state(params: dict[str, Any], context: VerificationContext
     return CheckOutcome(True, f"{len(claims)} filed invoice(s) have a payment or a pending approval", tuple(evidence))
 
 
+def check_accounting_invoice_matches(
+    params: dict[str, Any], context: VerificationContext
+) -> CheckOutcome:
+    """Each extracted invoice matches the system of record before any bill exists.
+
+    The read is the Verifier's own: the extraction names the supplier GSTIN,
+    name, number, total, and PO reference, and the check resolves them through
+    the read-only accounting client. It fails on an ambiguous vendor, a GSTIN or
+    name that disagrees with the vendor master, an existing bill with the same
+    number, or a PO whose amount or currency differs.
+    """
+    require_purchase_order = bool(params.get("require_purchase_order", False))
+    raw_statuses = params.get("purchase_order_statuses", ["open"])
+    if isinstance(raw_statuses, str):
+        raw_statuses = [raw_statuses]
+    purchase_order_statuses = {str(status).casefold() for status in raw_statuses}
+    extractions = [
+        record
+        for record in context.store.list_observations(context.run.id)
+        if record.tool == INVOICE_EXTRACT_TOOL and record.ok
+    ]
+    if not extractions:
+        return CheckOutcome(
+            False,
+            f"no successful {INVOICE_EXTRACT_TOOL} action is recorded on this Run",
+        )
+    failures: list[str] = []
+    evidence: list[str] = []
+    for record in extractions:
+        data = record.data or {}
+        parsed = data.get("parsed")
+        if not isinstance(parsed, dict):
+            failures.append(f"observation {record.id}: the extraction has no parsed invoice")
+            continue
+        name = parsed.get("supplier_name")
+        gstin = parsed.get("supplier_gstin")
+        number = parsed.get("invoice_number")
+        total = parsed.get("total_paise")
+        currency = parsed.get("currency")
+        if not all(isinstance(value, str) and value for value in (name, gstin, number, currency)):
+            failures.append(
+                f"observation {record.id}: the parsed invoice is missing supplier, "
+                "GSTIN, number, or currency"
+            )
+            continue
+        if not isinstance(total, int):
+            failures.append(f"observation {record.id}: the parsed invoice has no total")
+            continue
+        before = len(failures)
+        vendors = _vendors(context, name=name, tax_id=gstin)
+        if len(vendors) != 1:
+            failures.append(
+                f"{number}: {context.accounting.display_name} has {len(vendors)} "
+                f"vendor(s) matching GSTIN {gstin} or name {name!r}, expected one"
+            )
+            continue
+        vendor = vendors[0]
+        if gstin_key(vendor.tax_id) != gstin_key(gstin):
+            failures.append(
+                f"{number}: vendor {vendor.id} GSTIN {vendor.tax_id!r} does not match "
+                f"the source GSTIN {gstin!r}"
+            )
+            continue
+        if name_key(vendor.name) != name_key(name):
+            failures.append(
+                f"{number}: vendor {vendor.id} name {vendor.name!r} does not match "
+                f"the source name {name!r}"
+            )
+            continue
+        existing = [
+            bill
+            for bill in _bills(context, number=number, vendor_id=vendor.id)
+            if bill.status in LIVE_BILL_STATUSES
+        ]
+        if existing:
+            evidence.append(f"accounting:bill:{existing[0].id}")
+            failures.append(
+                f"{number}: {context.accounting.display_name} already has a bill "
+                f"for vendor {vendor.id} as {existing[0].id}"
+            )
+            continue
+        purchase_order = _po_reference(data)
+        if purchase_order is not None:
+            orders = [
+                order
+                for order in _purchase_orders(context, vendor_id=vendor.id)
+                if order.status.casefold() in purchase_order_statuses
+                and (
+                    reference_key(order.number or order.id)
+                    == reference_key(purchase_order)
+                    or reference_key(order.id) == reference_key(purchase_order)
+                )
+            ]
+            if len(orders) != 1:
+                failures.append(
+                    f"{number}: {context.accounting.display_name} has {len(orders)} "
+                    f"purchase order(s) {purchase_order!r} for vendor {vendor.id}, expected one"
+                )
+                continue
+            order = orders[0]
+            if order.amount_cents != total:
+                failures.append(
+                    f"{number}: amount {total / 100:,.2f} does not match purchase "
+                    f"order {order.id} ({order.amount_cents / 100:,.2f})"
+                )
+                continue
+            if order.currency.upper() != currency.upper():
+                failures.append(
+                    f"{number}: currency {currency} does not match purchase order "
+                    f"{order.id} ({order.currency})"
+                )
+                continue
+        elif require_purchase_order:
+            failures.append(
+                f"{number}: the extraction cites no purchase order and the Task Pack "
+                "requires one"
+            )
+            continue
+        if len(failures) == before:
+            evidence.append(f"accounting:vendor:{vendor.id}")
+            evidence.append(f"accounting:no-bill:{vendor.id}:{number}")
+            if purchase_order is not None:
+                evidence.append(f"accounting:purchaseorder:{order.id}")
+    if failures:
+        return CheckOutcome(False, "; ".join(failures), tuple(evidence))
+    return CheckOutcome(
+        True,
+        f"{len(extractions)} extracted invoice(s) match their vendor, duplicate, and "
+        f"{context.accounting.display_name} purchase-order records",
+        tuple(evidence),
+    )
+
+
+def _po_reference(data: dict[str, Any]) -> str | None:
+    """The PO reference from an extraction observation, when the source cites one."""
+    fields = data.get("fields") or {}
+    reference = fields.get("po_reference") if isinstance(fields, dict) else None
+    value = reference.get("value") if isinstance(reference, dict) else reference
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    parsed = data.get("parsed") or {}
+    parsed_reference = parsed.get("po_reference") if isinstance(parsed, dict) else None
+    if isinstance(parsed_reference, str) and parsed_reference.strip():
+        return parsed_reference.strip()
+    return None
+
+
 def check_file_archived(params: dict[str, Any], context: VerificationContext) -> CheckOutcome:
     """Every archive action landed its source document in the configured directory."""
     directory = params.get("directory", "archive")
@@ -501,6 +656,7 @@ def check_erp_vendor_matches(
 
 
 CHECKS: dict[str, CheckFunction] = {
+    "accounting_invoice_matches": check_accounting_invoice_matches,
     "erp_invoice_matches": check_erp_invoice_matches,
     "erp_payment_state": check_erp_payment_state,
     "erp_vendor_matches": check_erp_vendor_matches,

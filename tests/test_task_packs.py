@@ -266,7 +266,10 @@ def test_shipped_india_pack_is_valid() -> None:
     assert "files.extract" not in pack.tools
     assert pack.extraction is not None
     assert pack.extraction.confidence_threshold == 0.8
-    assert [check.id for check in pack.verification] == ["source-archived"]
+    assert [check.id for check in pack.verification] == [
+        "source-archived",
+        "accounting-invoice-matches",
+    ]
     for policy in pack.policies:
         assert policy in context.policies
 

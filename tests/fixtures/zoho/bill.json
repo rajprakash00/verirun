@@ -1,0 +1,15 @@
+{
+  "code": 0,
+  "message": "success",
+  "bill": {
+    "bill_id": "4600000000201",
+    "bill_number": "PTS/2026/0141",
+    "vendor_id": "4600000000001",
+    "vendor_name": "Paper Trail Supplies Pvt. Ltd.",
+    "total": "5000.00",
+    "currency_code": "INR",
+    "status": "open",
+    "date": "2026-08-01",
+    "purchaseorder_ids": ["4600000000101"]
+  }
+}

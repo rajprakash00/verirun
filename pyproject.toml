@@ -29,6 +29,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "playwright>=1.63.0",
     "pypdfium2>=5.13.0",
+    "cryptography>=50.0.2",
 ]
 
 [dependency-groups]

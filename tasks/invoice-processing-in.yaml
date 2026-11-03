@@ -27,3 +27,13 @@ verification:
     check: file_archived
     params:
       directory: processed
+  - id: accounting-invoice-matches
+    description: >-
+      The extracted invoice resolves to one vendor with the same GSTIN and name,
+      has no existing bill with the same number, and agrees with its purchase
+      order when the source cites one.
+    check: accounting_invoice_matches
+    params:
+      require_purchase_order: false
+      purchase_order_statuses:
+        - open

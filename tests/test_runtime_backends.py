@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from verirun.adapters import ImapSource, MockMailSource, WatchedFolderSource
+from verirun.adapters.zoho import (
+    ZohoAccountingReads,
+    ZohoAccountingSystem,
+)
 from verirun.config import Settings
 from verirun.runtime import Backends
 
@@ -23,6 +29,19 @@ def settings(tmp_path: Path, **overrides) -> Settings:
         mail_state_db=tmp_path / "mail-index.db",
         **overrides,
     )
+
+
+def zoho_settings(tmp_path: Path, **overrides) -> Settings:
+    values = {
+        "zoho_organization_id": "6000000000001",
+        "zoho_client_id": "client-id",
+        "zoho_client_secret": "client-secret",
+        "zoho_read_refresh_token": "refresh-token",
+        "zoho_token_key": "operator-secret",
+        "zoho_read_token_file": tmp_path / "zoho-read-token.enc",
+    }
+    values.update(overrides)
+    return settings(tmp_path, **values)
 
 
 def test_the_mock_suite_is_the_default_mail_source(tmp_path: Path) -> None:
@@ -79,3 +98,48 @@ def test_imap_is_preferred_when_both_sources_are_configured(tmp_path: Path) -> N
     )
 
     assert isinstance(backends.mail, ImapSource)
+
+
+def test_zoho_reads_replace_the_mock_accounting_when_configured(
+    tmp_path: Path,
+) -> None:
+    backends = Backends.from_settings(zoho_settings(tmp_path))
+
+    assert isinstance(backends.reads, ZohoAccountingReads)
+    assert isinstance(backends.accounting, ZohoAccountingSystem)
+    assert backends.verifier_accounting is backends.reads
+    assert backends.verifier_accounting is not backends.accounting
+    assert "client-secret" not in repr(zoho_settings(tmp_path))
+
+
+def test_a_token_file_makes_the_environment_refresh_token_optional(
+    tmp_path: Path,
+) -> None:
+    token_file = tmp_path / "zoho-read-token.enc"
+    token_file.write_bytes(b"encrypted-token")
+    chosen = zoho_settings(
+        tmp_path,
+        zoho_read_refresh_token="",
+        zoho_read_token_file=token_file,
+    )
+
+    backends = Backends.from_settings(chosen)
+
+    assert isinstance(backends.reads, ZohoAccountingReads)
+
+
+def test_a_partial_zoho_configuration_is_rejected(tmp_path: Path) -> None:
+    chosen = settings(
+        tmp_path,
+        zoho_organization_id="6000000000001",
+    )
+
+    with pytest.raises(ValueError, match="Zoho Books is partially configured"):
+        Backends.from_settings(chosen)
+
+
+def test_zoho_without_a_token_or_file_is_rejected(tmp_path: Path) -> None:
+    chosen = zoho_settings(tmp_path, zoho_read_refresh_token="")
+
+    with pytest.raises(ValueError, match="REFRESH_TOKEN"):
+        Backends.from_settings(chosen)

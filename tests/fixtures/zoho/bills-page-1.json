@@ -1,0 +1,43 @@
+{
+  "code": 0,
+  "message": "success",
+  "page_context": {
+    "page": 1,
+    "per_page": 200,
+    "has_more_page": false,
+    "report_name": "Bills"
+  },
+  "bills": [
+    {
+      "bill_id": "4600000000201",
+      "bill_number": "PTS/2026/0141",
+      "vendor_id": "4600000000001",
+      "vendor_name": "Paper Trail Supplies Pvt. Ltd.",
+      "total": "5000.00",
+      "currency_code": "INR",
+      "status": "open",
+      "date": "2026-08-01",
+      "purchaseorder_ids": ["4600000000101"]
+    },
+    {
+      "bill_id": "4600000000202",
+      "bill_number": "OTHER-1",
+      "vendor_id": "4600000000002",
+      "vendor_name": "Cascade Fabrication Pvt Ltd",
+      "total": "2000.00",
+      "currency_code": "INR",
+      "status": "paid",
+      "date": "2026-08-02"
+    },
+    {
+      "bill_id": "4600000000203",
+      "bill_number": "PTS/2026/0140",
+      "vendor_id": "4600000000001",
+      "vendor_name": "Paper Trail Supplies Pvt. Ltd.",
+      "total": "1000.00",
+      "currency_code": "INR",
+      "status": "void",
+      "date": "2026-08-03"
+    }
+  ]
+}
