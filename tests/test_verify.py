@@ -1035,6 +1035,38 @@ def test_a_bill_amount_that_differs_from_the_source_fails_the_check(
     assert "amount" in result.detail
 
 
+def test_a_bill_that_cites_a_different_purchase_order_fails_the_check(
+    tmp_path: Path,
+) -> None:
+    lines = (
+        "TAX INVOICE",
+        f"Supplier: {SUPPLIER}",
+        f"GSTIN: {GSTIN}",
+        f"Invoice number: {INVOICE_NUMBER}",
+        "Invoice date: 05/09/2026",
+        "Purchase order: PO-OTHER",
+        "Taxable amount: 10,000.00",
+        "CGST 9%: 900.00",
+        "SGST 9%: 900.00",
+        "IGST: 0.00",
+        "Total: 11,800.00 INR",
+    )
+    store, accounting = verified_india_bill(tmp_path, source_lines=lines)
+
+    run = verify_run(
+        "RUN-0001",
+        india_bill_pack(),
+        store,
+        accounting=accounting,
+        shared_root=tmp_path / "shared",
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "PO-OTHER" in result.detail
+
+
 def test_a_source_with_failing_gst_arithmetic_fails_the_check(
     tmp_path: Path,
 ) -> None:

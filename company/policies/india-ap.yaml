@@ -14,18 +14,40 @@ rules:
     actions:
       - bill.create
     when:
-      - field: amount_inr
+      - field: bill_amount_inr
         op: gt
         value: 10000
-  - id: unmatched-vendor-needs-approval
+  - id: bill-amount-differs-from-extraction
     description: >-
-      A bill against a vendor that does not resolve to exactly one Zoho Books
-      vendor must be approved by a human before it is created.
+      A proposed bill whose amount differs from the extracted invoice total
+      must be approved by a human before it is created.
     effect: require_approval
     actions:
       - bill.create
     when:
-      - field: vendor_matched
+      - field: amount_matches_extraction
+        op: eq
+        value: false
+  - id: bill-vendor-differs-from-extraction
+    description: >-
+      A bill whose vendor GSTIN or name differs from the extracted supplier, or
+      does not resolve, must be approved by a human before it is created.
+    effect: require_approval
+    actions:
+      - bill.create
+    when:
+      - field: vendor_identity_matches
+        op: eq
+        value: false
+  - id: bill-purchase-order-differs-from-extraction
+    description: >-
+      A bill whose purchase order differs from the reference printed on the
+      invoice must be approved by a human before it is created.
+    effect: require_approval
+    actions:
+      - bill.create
+    when:
+      - field: purchase_order_matches_extraction
         op: eq
         value: false
   - id: missing-purchase-order-needs-approval

@@ -281,7 +281,10 @@ class FileInvoiceTool(ErpTool):
                     **self.parameters["properties"],
                     "amount": {
                         "type": "number",
-                        "description": f"Invoice total in {default_currency}, for example 11800.00.",
+                        "description": (
+                            f"Invoice total in {default_currency}, "
+                            "for example 11800.00."
+                        ),
                     },
                     "currency": {
                         "type": "string",

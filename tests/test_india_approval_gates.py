@@ -46,18 +46,30 @@ def gate_registry(
                 created_at=CREATED_AT,
             )
         ],
-        purchase_orders=[
-            PurchaseOrder(
-                id=PO_ID,
-                vendor_id="V-IN-1001",
-                amount_cents=1_000_000,
-                currency="INR",
-                status="open",
-                issued_at=CREATED_AT,
-            )
-        ]
-        if purchase_order
-        else [],
+        purchase_orders=(
+            [
+                PurchaseOrder(
+                    id=PO_ID,
+                    number=PO_ID,
+                    vendor_id="V-IN-1001",
+                    amount_cents=1_000_000,
+                    currency="INR",
+                    status="open",
+                    issued_at=CREATED_AT,
+                ),
+                PurchaseOrder(
+                    id="PO-OTHER",
+                    number="PO-OTHER",
+                    vendor_id="V-IN-1001",
+                    amount_cents=1_000_000,
+                    currency="INR",
+                    status="open",
+                    issued_at=CREATED_AT,
+                ),
+            ]
+            if purchase_order
+            else []
+        ),
     )
     store = RunStore(tmp_path / "runs.db")
     store.create_run("Process the tax invoice", "invoice-processing-in", run_id="RUN-1")
@@ -88,7 +100,9 @@ def gate_registry(
         allowlist=["erp.file_invoice"],
         gate=PolicyGate(
             context.policies,
-            run_facts=run_policy_facts(store, "RUN-1", pack),
+            run_facts=run_policy_facts(
+                store, "RUN-1", pack, accounting=accounting
+            ),
             policy_ids=pack.policies,
         ),
     )
@@ -130,19 +144,44 @@ def test_an_amount_above_the_threshold_parks_for_approval(tmp_path: Path) -> Non
 
 def test_an_unmatched_vendor_parks_for_approval(tmp_path: Path) -> None:
     observation = gate_registry(tmp_path).invoke(
-        "erp.file_invoice", {**file_args(), "vendor_id": "V-NOT-IN-ZOHO"}
+        "erp.file_invoice",
+        {**file_args(amount=10_000.0), "vendor_id": "V-NOT-IN-ZOHO"},
     )
 
     assert not observation.ok
     assert observation.data["approval_required"] is True
-    assert observation.data["rule"] == "unmatched-vendor-needs-approval"
+    assert observation.data["rule"] == "bill-vendor-differs-from-extraction"
+
+
+def test_an_amount_that_differs_from_the_extraction_parks_for_approval(
+    tmp_path: Path,
+) -> None:
+    observation = gate_registry(tmp_path).invoke(
+        "erp.file_invoice", file_args(amount=9_000.0)
+    )
+
+    assert not observation.ok
+    assert observation.data["approval_required"] is True
+    assert observation.data["rule"] == "bill-amount-differs-from-extraction"
+
+
+def test_a_purchase_order_that_differs_from_the_invoice_parks_for_approval(
+    tmp_path: Path,
+) -> None:
+    observation = gate_registry(tmp_path).invoke(
+        "erp.file_invoice", file_args(amount=10_000.0, po_id="PO-OTHER")
+    )
+
+    assert not observation.ok
+    assert observation.data["approval_required"] is True
+    assert observation.data["rule"] == "bill-purchase-order-differs-from-extraction"
 
 
 def test_a_missing_required_purchase_order_parks_for_approval(
     tmp_path: Path,
 ) -> None:
     observation = gate_registry(tmp_path).invoke(
-        "erp.file_invoice", file_args(po_id=None)
+        "erp.file_invoice", file_args(amount=10_000.0, po_id=None)
     )
 
     assert not observation.ok
@@ -153,7 +192,7 @@ def test_a_missing_required_purchase_order_parks_for_approval(
 def test_a_low_confidence_extraction_parks_for_approval(tmp_path: Path) -> None:
     observation = gate_registry(
         tmp_path, min_confidence=0.42, low_confidence=True
-    ).invoke("erp.file_invoice", file_args())
+    ).invoke("erp.file_invoice", file_args(amount=10_000.0))
 
     assert not observation.ok
     assert observation.data["approval_required"] is True
@@ -162,7 +201,7 @@ def test_a_low_confidence_extraction_parks_for_approval(tmp_path: Path) -> None:
 
 def test_an_inactive_vendor_is_a_denial_not_a_gate(tmp_path: Path) -> None:
     observation = gate_registry(tmp_path, vendor_status="inactive").invoke(
-        "erp.file_invoice", file_args()
+        "erp.file_invoice", file_args(amount=10_000.0)
     )
 
     assert not observation.ok

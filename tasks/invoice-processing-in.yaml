@@ -33,10 +33,24 @@ approval_rules:
     policy: india-ap
     actions:
       - bill.create
-  - id: unmatched-vendor-needs-approval
+  - id: bill-amount-differs-from-extraction
     description: >-
-      A bill against a new or unmatched vendor waits for a human yes before it
-      is created.
+      A bill whose amount differs from the extracted invoice total waits for a
+      human yes before it is created.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: bill-vendor-differs-from-extraction
+    description: >-
+      A bill against a new, unmatched, or different vendor waits for a human yes
+      before it is created.
+    policy: india-ap
+    actions:
+      - bill.create
+  - id: bill-purchase-order-differs-from-extraction
+    description: >-
+      A bill whose purchase order differs from the printed reference waits for
+      a human yes before it is created.
     policy: india-ap
     actions:
       - bill.create

@@ -12,7 +12,6 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
 
 SUPPLIER = re.compile(r"^Supplier:\s*(.+?)\s*$", re.MULTILINE)
 GSTIN = re.compile(r"^GSTIN:\s*(\S+)\s*$", re.MULTILINE)
@@ -121,19 +120,3 @@ def _paise(raw: str, field: str) -> int:
     if paise != paise.to_integral_value():
         raise ValueError(f"the {field} {raw!r} has more than two decimals")
     return int(paise)
-
-
-def invoice_as_dict(invoice: SourceInvoice) -> dict[str, Any]:
-    """The parsed invoice as evidence-friendly JSON."""
-    return {
-        "supplier_name": invoice.supplier_name,
-        "supplier_gstin": invoice.supplier_gstin,
-        "invoice_number": invoice.invoice_number,
-        "taxable_paise": invoice.taxable_paise,
-        "cgst_paise": invoice.cgst_paise,
-        "sgst_paise": invoice.sgst_paise,
-        "igst_paise": invoice.igst_paise,
-        "total_paise": invoice.total_paise,
-        "currency": invoice.currency,
-        "po_reference": invoice.po_reference,
-    }

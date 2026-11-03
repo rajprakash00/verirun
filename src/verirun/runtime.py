@@ -5,18 +5,21 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 from verirun.adapters import (
     AccountingReads,
     AccountingSystem,
+    AdapterError,
     ImapSource,
     MailSource,
     MockAccountingSystem,
     MockMailSource,
     WatchedFolderSource,
 )
+from verirun.adapters.matching import gstin_key, name_key, reference_key
 from verirun.adapters.zoho import (
     ZohoAccountingReads,
     ZohoAccountingSystem,
@@ -154,9 +157,9 @@ def _zoho_accounting(settings: Settings) -> tuple[ZohoAccountingReads, ZohoAccou
         token_file=settings.zoho_write_token_file,
         read_only=False,
     )
-    read_only = ZohoAccountingReads(read_client)
+    verifier_reads = ZohoAccountingReads(read_client)
     write_reads = ZohoAccountingReads(write_client)
-    return read_only, ZohoAccountingSystem(write_reads)
+    return verifier_reads, ZohoAccountingSystem(write_reads)
 
 
 def _zoho_client(
@@ -194,14 +197,20 @@ def sync_mail(backends: Backends) -> int:
 
 
 def run_policy_facts(
-    store: RunStore, run_id: str, task_pack: TaskPack
+    store: RunStore,
+    run_id: str,
+    task_pack: TaskPack,
+    *,
+    accounting: AccountingReads | None = None,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     """Facts the engine already recorded that approval rules need.
 
     A bill's approval can depend on the extraction that produced it, not only
-    on the bill arguments. Reading the Run's own observations here keeps that
-    fact out of the model's hands: the model cannot claim a confidence it did
-    not produce.
+    on the bill arguments. Reading the Run's own observations here keeps those
+    facts out of the model's hands: the model cannot claim a confidence, total,
+    supplier, or purchase order it did not read. The proposed arguments are
+    still checked against them, so an understated amount or a different vendor
+    parks for a human instead of passing the gate.
     """
     threshold = (
         task_pack.extraction.confidence_threshold if task_pack.extraction else None
@@ -221,14 +230,17 @@ def run_policy_facts(
                 if parsed.get("invoice_number") == number:
                     chosen = record
                     break
-        if chosen is None:
+        elif extractions:
             successes = [record for record in extractions if record.ok]
             chosen = successes[-1] if successes else None
         result: dict[str, Any] = {
             "purchase_order_required": task_pack.requires_purchase_order,
         }
+        proposed = _rupees(args.get("amount"))
+        extracted = None
         if chosen is not None:
             data = chosen.data or {}
+            parsed = data.get("parsed") or {}
             minimum = data.get("min_confidence")
             result["extraction_min_confidence"] = minimum
             result["extraction_below_threshold"] = bool(
@@ -239,9 +251,71 @@ def run_policy_facts(
                     and minimum < threshold
                 )
             )
+            total_paise = parsed.get("total_paise")
+            if isinstance(total_paise, int) and not isinstance(total_paise, bool):
+                extracted = total_paise / 100
+                result["extraction_total_inr"] = extracted
+                if proposed is not None:
+                    result["amount_matches_extraction"] = (
+                        abs(proposed - extracted) < 0.005
+                    )
+            supplier_gstin = parsed.get("supplier_gstin")
+            supplier_name = parsed.get("supplier_name")
+            vendor_id = args.get("vendor_id")
+            if (
+                accounting is not None
+                and isinstance(vendor_id, str)
+                and vendor_id
+                and (supplier_gstin or supplier_name)
+            ):
+                try:
+                    vendor = accounting.get_vendor(vendor_id)
+                except AdapterError:
+                    result["vendor_identity_matches"] = False
+                else:
+                    gstin_ok = not supplier_gstin or gstin_key(
+                        vendor.tax_id
+                    ) == gstin_key(supplier_gstin)
+                    name_ok = not supplier_name or name_key(
+                        vendor.name
+                    ) == name_key(supplier_name)
+                    result["vendor_identity_matches"] = gstin_ok and name_ok
+            po_reference = parsed.get("po_reference")
+            po_id = args.get("po_id")
+            if (
+                accounting is not None
+                and isinstance(po_id, str)
+                and po_id
+                and isinstance(po_reference, str)
+                and po_reference
+            ):
+                try:
+                    order = accounting.get_purchase_order(po_id)
+                except AdapterError:
+                    result["purchase_order_matches_extraction"] = False
+                else:
+                    result["purchase_order_matches_extraction"] = (
+                        reference_key(po_reference)
+                        in {
+                            reference_key(order.number or order.id),
+                            reference_key(order.id),
+                        }
+                    )
+        amounts = [amount for amount in (proposed, extracted) if amount is not None]
+        if amounts:
+            result["bill_amount_inr"] = max(amounts)
         return result
 
     return facts
+
+
+def _rupees(raw: Any) -> float | None:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        return None
+    try:
+        return float(Decimal(str(raw).strip().lstrip("$").replace(",", "")))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def build_registry(
@@ -307,7 +381,7 @@ def build_registry(
             context.policies,
             approval_gates=approval_gates,
             run_facts=policy_facts,
-            policy_ids=task_pack.policies,
+            policy_ids=task_pack.policy_ids(),
         ),
     )
 
@@ -335,7 +409,12 @@ def live_registry(
         client=client,
         prices=settings.prices,
     )
-    facts = run_policy_facts(RunStore(settings.run_db), run_id, task_pack)
+    facts = run_policy_facts(
+        RunStore(settings.run_db),
+        run_id,
+        task_pack,
+        accounting=backends.accounting,
+    )
     try:
         yield build_registry(
             settings,

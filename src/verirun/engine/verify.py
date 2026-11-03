@@ -590,7 +590,9 @@ def check_india_bill_matches(
         for tax in taxes:
             if not tax.ok:
                 failures.append(f"{invoice.id}: {tax.detail}")
-        failures.extend(_india_reference_failures(context, invoice))
+        failures.extend(
+            _india_reference_failures(context, invoice, parsed.po_reference)
+        )
         if len(failures) == before:
             evidence.extend(
                 [
@@ -614,15 +616,30 @@ def check_india_bill_matches(
 
 
 def _india_reference_failures(
-    context: VerificationContext, invoice: Bill
+    context: VerificationContext, invoice: Bill, source_reference: str | None
 ) -> list[str]:
-    """A Zoho purchase bill must agree with the purchase order it cites."""
+    """A Zoho purchase bill must agree with the source and cited purchase order."""
+    if source_reference and not invoice.po_id:
+        return [
+            (
+                f"{invoice.id}: source cites purchase order {source_reference} "
+                "but the bill has none"
+            )
+        ]
     if not invoice.po_id:
         return []
     order = _purchase_order(context, invoice.po_id)
     if order is None:
         return [f"{invoice.id}: purchase order {invoice.po_id} is missing"]
     failures: list[str] = []
+    if source_reference and reference_key(source_reference) not in {
+        reference_key(order.number or order.id),
+        reference_key(order.id),
+    }:
+        failures.append(
+            f"{invoice.id}: bill cites purchase order {invoice.po_id} but the "
+            f"source cites {source_reference}"
+        )
     if order.vendor_id != invoice.vendor_id:
         failures.append(
             f"{invoice.id}: purchase order {invoice.po_id} belongs to another vendor"

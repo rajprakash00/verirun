@@ -36,13 +36,15 @@ bill's total is the only money field the existing `Bill` model reads.
    reconciles once; if the bill is still not found, the outcome is unknown and
    the Run escalates for a human. Only a 429 is retried, because Zoho rejected
    it.
-4. **Policy facts come from the Tool and the Run.** The bill Tool supplies
-   amount, currency, vendor match/status, and purchase-order presence. The
-   policy gate merges facts the engine already recorded, including the
-   extraction below the Task Pack threshold and whether the pack requires a
-   purchase order. The model cannot claim a confidence it did not produce.
-   Policies are scoped to the Task Pack, so the India rule does not gate the
-   Mock Suite packs.
+4. **Policy facts come from the Tool and the Run.** The bill Tool supplies the
+   proposed amount, currency, vendor status, and purchase-order presence. The
+   policy gate merges facts the engine already recorded: the extraction total,
+   supplier GSTIN and name, purchase-order reference, confidence, and whether
+   the pack requires a purchase order. The proposed bill's amount, vendor, and
+   purchase order must agree with those facts before the gate can pass, so a
+   model that understates an amount or names a different vendor parks for a
+   human instead of writing. Policies are scoped to the Task Pack, so the India
+   rule does not gate the Mock Suite packs.
 5. **Low confidence becomes an Approval Gate, not an escalation.** India text
    extraction records `low_confidence` and still succeeds; the bill's gate is
    the human decision point. The US vision path keeps its immediate escalation

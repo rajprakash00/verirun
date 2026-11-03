@@ -276,7 +276,9 @@ def test_shipped_india_pack_is_valid() -> None:
     ]
     assert {rule.id for rule in pack.approval_rules} == {
         "bill-approval-threshold",
-        "unmatched-vendor-needs-approval",
+        "bill-amount-differs-from-extraction",
+        "bill-vendor-differs-from-extraction",
+        "bill-purchase-order-differs-from-extraction",
         "missing-purchase-order-needs-approval",
         "low-confidence-extraction-needs-approval",
         "no-bill-for-inactive-vendor",

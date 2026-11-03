@@ -417,6 +417,10 @@ What is not built:
   after any required approval, verifies the bill against the source PDF, and
   archives the source. MailDesk, LedgerLite, and the shared file tree remain the
   offline fixtures; payments are scheduled, not transferred; no email is sent.
+- **Zoho GST tax lines.** The source invoice's GSTIN and tax arithmetic are
+  verified, and the Zoho bill total must match, but bill creation posts one line
+  item without an organisation-specific `tax_id`. Populating Zoho tax lines is a
+  later integration with the customer's tax setup.
 - **Authentication, authorization, multi-tenancy, or cloud deployment.** The
   dashboard binds to localhost and has no login or tenant boundary.
 - **A queue, scheduler, or parallel execution.** One process runs one Request at

@@ -65,8 +65,8 @@ WORK_ORDER = {
             "policy": "india-ap",
         },
         {
-            "id": "unmatched-vendor-needs-approval",
-            "description": "A bill for an unmatched vendor waits for a human",
+            "id": "bill-vendor-differs-from-extraction",
+            "description": "A bill for a different or unmatched vendor waits for a human",
             "policy": "india-ap",
         },
     ],
@@ -203,7 +203,9 @@ def run_scenario(
         pack,
         llm,
         backends=backends,
-        policy_facts=run_policy_facts(store, run_id, pack),
+        policy_facts=run_policy_facts(
+            store, run_id, pack, accounting=backends.accounting
+        ),
     )
 
     run = run_task(

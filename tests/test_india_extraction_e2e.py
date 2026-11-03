@@ -37,7 +37,7 @@ from verirun.engine.approve import approve
 from verirun.engine.orchestrator import resume_run, run_task
 from verirun.engine.states import RunState
 from verirun.runs.store import RunStore
-from verirun.runtime import Backends, build_registry
+from verirun.runtime import Backends, build_registry, run_policy_facts
 
 CREATED_AT = "2026-09-01T09:00:00+00:00"
 REQUEST = "Process the tax invoice in the AP mailbox"
@@ -64,8 +64,8 @@ WORK_ORDER = {
             "policy": "india-ap",
         },
         {
-            "id": "unmatched-vendor-needs-approval",
-            "description": "A bill for an unmatched vendor waits for a human",
+            "id": "bill-vendor-differs-from-extraction",
+            "description": "A bill for a different or unmatched vendor waits for a human",
             "policy": "india-ap",
         },
     ],
@@ -219,7 +219,14 @@ def test_fixture_mailbox_becomes_a_verified_evidence_pack(tmp_path: Path) -> Non
         backends = Backends(mail=source, accounting=accounting_fake())
         store = RunStore(chosen.run_db)
         registry = build_registry(
-            chosen, context, pack, script, backends=backends
+            chosen,
+            context,
+            pack,
+            script,
+            backends=backends,
+            policy_facts=run_policy_facts(
+                store, "RUN-IN-0001", pack, accounting=backends.accounting
+            ),
         )
         run = run_task(
             REQUEST,
