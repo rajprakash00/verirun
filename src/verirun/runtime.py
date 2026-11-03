@@ -381,7 +381,9 @@ def build_registry(
             context.policies,
             approval_gates=approval_gates,
             run_facts=policy_facts,
-            policy_ids=task_pack.policy_ids(),
+            # A pack that declares no policies keeps the historical behavior:
+            # every Company policy applies rather than silently none.
+            policy_ids=task_pack.policy_ids() or None,
         ),
     )
 
