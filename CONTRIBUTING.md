@@ -9,12 +9,14 @@ repository; the product spec is [`SPEC.md`](SPEC.md), the design is
 
 ```bash
 uv sync
+uv sync --extra postgres                    # only for the PostgreSQL store tests
 uv run playwright install chromium          # add --with-deps on a fresh Linux box
 cp .env.example .env                        # only needed for live runs
 ```
 
 Python 3.12+ and [uv](https://docs.astral.sh/uv/) are required. The test suite
-and the demo run offline and need no API key.
+and the demo run offline and need no API key. PostgreSQL tests skip unless
+`VERIRUN_TEST_DATABASE_URL` points at a disposable database; CI provides one.
 
 ## Test
 

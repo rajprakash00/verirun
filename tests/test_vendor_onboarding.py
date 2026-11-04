@@ -21,6 +21,7 @@ from verirun.cli import main
 from verirun.engine.states import RunState
 from verirun.runs.store import RunStore
 from verirun.web import create_app
+from verirun.worker import Worker
 
 CASCADE = {
     "name": "Cascade Fabrication LLC",
@@ -118,6 +119,7 @@ def test_a_vendor_onboarding_request_completes_verified_after_approval(
             "Onboard Cascade Fabrication LLC from the procurement mailbox",
             "--task",
             "vendor-onboarding",
+            "--wait",
         ],
         settings=settings,
         client=script,
@@ -139,8 +141,9 @@ def test_a_vendor_onboarding_request_completes_verified_after_approval(
     with closing(ledgerlite.connect(ledgerlite_db)) as conn:
         assert conn.execute("SELECT * FROM vendors WHERE tax_id = 'TAX-2001'").fetchall() == []
 
-    client = TestClient(create_app(settings, client_factory=lambda _run_id: script))
+    client = TestClient(create_app(settings))
     response = client.post(f"/approvals/{request.id}/approve", follow_redirects=False)
+    Worker(settings, store=store, client_factory=lambda _run_id: script).run_once()
 
     assert response.status_code == 303
     run = store.get_run(run.id)
@@ -206,6 +209,7 @@ def test_a_duplicate_vendor_is_caught_before_creation(
             "Onboard Apex Office Supplies from the procurement mailbox",
             "--task",
             "vendor-onboarding",
+            "--wait",
         ],
         settings=settings,
         client=script,
@@ -256,6 +260,7 @@ def test_a_missing_tax_form_escalates(
             "Onboard Meridian Plastics from the procurement mailbox",
             "--task",
             "vendor-onboarding",
+            "--wait",
         ],
         settings=settings,
         client=script,

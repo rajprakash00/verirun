@@ -8,7 +8,6 @@ aborts it with the reason. A pending request never auto-approves.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,30 +16,28 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from verirun.config import Settings
-from verirun.context.company import load_company_context
-from verirun.context.task_pack import load_task_pack
 from verirun.engine.approve import approve, reject
-from verirun.engine.orchestrator import report_run, resume_run
+from verirun.engine.orchestrator import report_run
 from verirun.engine.states import StepState
-from verirun.llm.client import LLMClient, build_client
 from verirun.runs.store import (
     ApprovalNotFoundError,
+    ExceptionNotFoundError,
     RunNotFoundError,
     RunStore,
 )
-from verirun.runtime import Backends, live_registry
+from verirun.worker import enqueue_resume
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
-ClientFactory = Callable[[str], LLMClient]
+def create_app(settings: Settings) -> FastAPI:
+    """The dashboard for one Settings: the same Run store the CLI writes.
 
-
-def create_app(settings: Settings, *, client_factory: ClientFactory | None = None) -> FastAPI:
-    """The dashboard for one Settings: the same Run store the CLI writes."""
+    Mutating requests only record a decision and enqueue the Run. A separate
+    worker process executes it, so no HTTP request waits on a model or an ERP.
+    """
     app = FastAPI(title="Verirun", docs_url=None, redoc_url=None)
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
-    store = RunStore(settings.run_db)
-    make_client = client_factory or (lambda run_id: build_client(settings, session_id=run_id))
+    store = RunStore.for_settings(settings)
 
     def approval_review(approval: Any) -> dict[str, Any]:
         """The facts an approver needs: source, extraction, validations, bill.
@@ -107,6 +104,7 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
                 if request.status == "pending"
             ],
             "escalations": store.list_escalations(run_id),
+            "exceptions": store.list_exceptions(run_id),
             "verification": store.get_verification(run_id),
             "evidence_path": settings.run_db.parent / run_id / "evidence.json",
         }
@@ -124,29 +122,8 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
         return request
 
     def resume(run_id: str) -> None:
-        run = store.get_run(run_id)
-        context = load_company_context(settings.company_dir)
-        task_pack = load_task_pack(settings.tasks_dir / f"{run.task_id}.yaml")
-        client = make_client(run_id)
-        # Only the CLI starts new Runs; a resume reads the already-ingested
-        # source, so a mailbox error cannot block an approval decision.
-        backends = Backends.from_settings(settings)
-        with live_registry(
-            settings, context, task_pack, client, run_id, backends=backends
-        ) as registry:
-            resume_run(
-                run_id,
-                task_pack,
-                client,
-                store,
-                registry,
-                accounting=backends.verifier_accounting,
-                shared_root=backends.mail.document_root,
-                evidence_root=settings.run_db.parent,
-                max_steps=settings.max_steps,
-                max_cost_usd=settings.max_cost_usd,
-                prices=settings.prices,
-            )
+        """Queue a Run for the worker; the HTTP request never waits on it."""
+        enqueue_resume(store, run_id)
 
     @app.get("/", response_class=HTMLResponse)
     def runs_page(request: Request) -> Any:
@@ -170,6 +147,45 @@ def create_app(settings: Settings, *, client_factory: ClientFactory | None = Non
             "approvals.html",
             {"approvals": [approval_review(item) for item in pending]},
         )
+
+    @app.get("/exceptions", response_class=HTMLResponse)
+    def exceptions_page(request: Request) -> Any:
+        return templates.TemplateResponse(
+            request,
+            "exceptions.html",
+            {"exceptions": store.list_open_exceptions()},
+        )
+
+    @app.post("/exceptions/{exception_id}/resolve")
+    def resolve_exception(
+        exception_id: int,
+        outcome: str = Form("acknowledged"),
+        resolution: str = Form(""),
+        bill_id: str = Form(""),
+    ) -> RedirectResponse:
+        try:
+            exception = store.get_exception(exception_id)
+        except ExceptionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        result = None
+        if outcome == "landed":
+            result = {
+                "ok": True,
+                "summary": resolution.strip()
+                or f"Reconciled by a human as Exception {exception_id}",
+                "data": {
+                    "invoice_id": bill_id.strip(),
+                    "reconciled": True,
+                },
+            }
+        store.resolve_exception(
+            exception_id,
+            resolution=resolution.strip() or "resolved without a note",
+            outcome=outcome,
+            result=result,
+        )
+        enqueue_resume(store, exception.run_id)
+        return RedirectResponse(f"/runs/{exception.run_id}", status_code=303)
 
     @app.post("/approvals/{approval_id}/approve")
     def approve_request(approval_id: int) -> RedirectResponse:

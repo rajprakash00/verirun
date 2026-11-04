@@ -69,6 +69,31 @@ class Tool(ABC):
         """Facts the policy gate needs before this tool runs. Read-only."""
         return {}
 
+    def claim_key(self, args: dict[str, Any]) -> str | None:
+        """The natural key this side effect must not write twice.
+
+        A bill, for example, is unique by vendor and invoice number. The engine
+        commits the claim with the journal intent, so a second Run cannot write
+        the same natural key while a crash or an unknown outcome is unresolved.
+        """
+        return None
+
+    def claim_detail(self, args: dict[str, Any]) -> dict[str, Any]:
+        """The facts a human needs when this natural key is already claimed."""
+        return {}
+
+    def reconcile(
+        self, args: dict[str, Any], idempotency_key: str
+    ) -> Observation | None:
+        """Look for this side effect's earlier write after a crash.
+
+        Return a successful Observation when the effect already landed, or
+        ``None`` when it provably did not. Raise :class:`ToolError` with an
+        ``unknown`` kind when the system cannot say; the engine then parks the
+        Run instead of retrying the write.
+        """
+        return None
+
     def adapter_call(self, method: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """Call an adapter and map its classified failure to a ToolError."""
         try:

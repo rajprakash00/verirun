@@ -88,7 +88,7 @@ def test_ambiguous_request_asks_instead_of_assuming(
     settings = replay_settings(tmp_path)
 
     code = main(
-        ["run", "Handle whatever is going on with the vendor", "--task", "invoice-processing"],
+        ["run", "Handle whatever is going on with the vendor", "--task", "invoice-processing", "--wait"],
         settings=settings,
     )
 

@@ -52,10 +52,25 @@ def start_run(
     *,
     run_id: str | None = None,
 ) -> Run:
+    """Create a Run and resolve it, or continue one interrupted mid-resolve.
+
+    A queued ``start`` job is retried after a crash. Reusing the existing Run
+    (instead of inserting the same id again) makes that retry safe.
+    """
     validate_task_pack(task_pack, context)
-    run = store.create_run(request, task_pack.id, run_id=run_id)
+    run: Run | None = None
+    if run_id is not None:
+        try:
+            run = store.get_run(run_id)
+        except RunNotFoundError:
+            run = None
+    if run is None:
+        run = store.create_run(request, task_pack.id, run_id=run_id)
+    elif run.state not in (RunState.CREATED, RunState.RESOLVING):
+        return run
     try:
-        store.transition(run.id, RunState.RESOLVING)
+        if run.state is RunState.CREATED:
+            run = store.transition(run.id, RunState.RESOLVING)
         work_order = resolve(request, task_pack, context, client)
         store.save_work_order(run.id, work_order)
         if work_order.open_questions:
@@ -102,27 +117,19 @@ def run_task(
     run_id = run_id or generate_run_id()
     try:
         run = start_run(request, task_pack, context, client, store, run_id=run_id)
-        if run.state is RunState.PLANNED:
-            run = execute_run(
-                run.id,
-                client,
-                store,
-                registry,
-                max_steps=max_steps,
-                max_cost_usd=max_cost_usd,
-                prices=prices,
-                task_pack=task_pack,
-            )
-        if run.state is RunState.VERIFYING:
-            run = _verify_or_accept(
-                run,
-                task_pack,
-                store,
-                client=client,
-                accounting=accounting,
-                shared_root=shared_root,
-                verifier=verifier,
-            )
+        run = _execute_and_verify(
+            run,
+            task_pack,
+            store,
+            client=client,
+            registry=registry,
+            accounting=accounting,
+            shared_root=shared_root,
+            max_steps=max_steps,
+            max_cost_usd=max_cost_usd,
+            prices=prices,
+            verifier=verifier,
+        )
     finally:
         if write_evidence:
             try:
@@ -130,6 +137,49 @@ def run_task(
             except RunNotFoundError:
                 pass
     return store.get_run(run_id)
+
+
+def _execute_and_verify(
+    run: Run,
+    task_pack: TaskPack,
+    store: RunStore,
+    *,
+    client: LLMClient,
+    registry: ToolRegistry,
+    accounting: AccountingReads,
+    shared_root: str | Path,
+    max_steps: int,
+    max_cost_usd: float,
+    prices: dict[str, ModelPrice] | None,
+    verifier: bool,
+) -> Run:
+    if run.state in (
+        RunState.PLANNED,
+        RunState.EXECUTING,
+        RunState.AWAITING_APPROVAL,
+        RunState.FAILED,
+    ):
+        run = execute_run(
+            run.id,
+            client,
+            store,
+            registry,
+            max_steps=max_steps,
+            max_cost_usd=max_cost_usd,
+            prices=prices,
+            task_pack=task_pack,
+        )
+    if run.state is RunState.VERIFYING:
+        run = _verify_or_accept(
+            run,
+            task_pack,
+            store,
+            client=client,
+            accounting=accounting,
+            shared_root=shared_root,
+            verifier=verifier,
+        )
+    return run
 
 
 def resume_run(

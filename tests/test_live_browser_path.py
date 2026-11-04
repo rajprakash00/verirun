@@ -32,6 +32,7 @@ from verirun.runs.store import RunStore
 from verirun.runtime import Backends, build_registry, live_registry
 from verirun.tools import BrowserSession
 from verirun.web import create_app
+from verirun.worker import Worker
 
 BROWSER_TOOLS = {
     "browser.navigate",
@@ -232,7 +233,7 @@ def test_cli_run_executes_a_browser_step(
     )
 
     code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=live_script(ledgerlite_server),
     )
@@ -281,9 +282,10 @@ def test_approving_over_http_resumes_with_a_browser_step(
     )
     request = store.open_approval(run.id)
     assert request is not None
-    client = TestClient(create_app(settings, client_factory=lambda _run_id: script))
+    client = TestClient(create_app(settings))
 
     response = client.post(f"/approvals/{request.id}/approve", follow_redirects=False)
+    Worker(settings, store=store, client_factory=lambda _run_id: script).run_once()
 
     assert response.status_code == 303
     resumed = store.get_run(run.id)

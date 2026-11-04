@@ -28,6 +28,26 @@
   {% endfor %}
 </ul>
 {% endif %}
+{% if exceptions %}
+<h2>Exceptions</h2>
+<ul class="timeline">
+  {% for exception in exceptions %}
+  <li class="bad">
+    <span class="muted">{{ exception.created_at.strftime("%H:%M:%S") }}</span>
+    <code>{{ exception.kind }}</code>
+    <span class="badge {{ 'ok' if exception.status == 'resolved' else 'bad' }}">{{ exception.status }}</span>
+    {{ exception.summary }}
+    <div>{{ exception.question }}</div>
+    {% if exception.evidence %}
+    <div class="muted">
+      {% for key, value in exception.evidence.items() %}<code>{{ key }}</code>: {{ value }}{% if not loop.last %} · {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+    {% if exception.resolution %}<div class="muted">Resolution: {{ exception.resolution }}</div>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
 {% if escalations %}
 <h2>Escalations</h2>
 <ul class="timeline">

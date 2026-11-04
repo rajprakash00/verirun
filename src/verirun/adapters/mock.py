@@ -33,6 +33,7 @@ from verirun.adapters.rules import (
     duplicate_bill_error,
     duplicate_vendor_error,
     partial_payment_error,
+    reference_marker,
     require_positive_amount,
 )
 
@@ -293,17 +294,22 @@ class MockAccountingSystem(AccountingSystem):
         gr_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> Bill:
-        del idempotency_key  # the Mock Suite journal already guards its writes
         require_positive_amount(amount_cents)
         po_id = po_id or None
         gr_id = gr_id or None
+        marker = reference_marker(idempotency_key)
         with closing(self._connect()) as conn, conn:
             self._one(conn, "vendors", vendor_id, "vendor")
             existing = conn.execute(
-                "SELECT id, status FROM invoices WHERE vendor_id = ? AND number = ?",
+                """
+                SELECT id, status, reference FROM invoices
+                WHERE vendor_id = ? AND number = ?
+                """,
                 (vendor_id, number),
             ).fetchone()
             if existing is not None:
+                if marker and existing["reference"] == marker:
+                    return self.get_bill(existing["id"])
                 raise duplicate_bill_error(
                     number=number,
                     vendor_id=vendor_id,
@@ -343,8 +349,8 @@ class MockAccountingSystem(AccountingSystem):
                 """
                 INSERT INTO invoices
                     (id, number, vendor_id, po_id, gr_id, amount_cents, currency, status,
-                     received_at, scenario)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'received', ?, 'filed')
+                     received_at, scenario, reference)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'received', ?, 'filed', ?)
                 """,
                 (
                     bill_id,
@@ -355,6 +361,7 @@ class MockAccountingSystem(AccountingSystem):
                     amount_cents,
                     currency,
                     received_at,
+                    marker,
                 ),
             )
         return Bill(
@@ -523,6 +530,7 @@ def _bill(row: dict[str, Any]) -> Bill:
         status=row["status"],
         received_at=row["received_at"],
         scenario=row["scenario"],
+        reference=row.get("reference", ""),
     )
 
 

@@ -33,6 +33,22 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: verirun
+          POSTGRES_PASSWORD: verirun
+          POSTGRES_DB: verirun_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      VERIRUN_TEST_DATABASE_URL: postgresql://verirun:verirun@localhost:5432/verirun_test
     steps:
       - uses: actions/checkout@v7
       - name: Install uv
@@ -42,7 +58,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Sync dependencies
-        run: uv sync --locked
+        run: uv sync --locked --extra postgres
       - name: Install Chromium
         run: uv run playwright install --with-deps chromium
       - name: Run tests with coverage

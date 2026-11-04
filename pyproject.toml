@@ -39,6 +39,11 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.optional-dependencies]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
+
 [project.scripts]
 verirun = "verirun.cli:main"
 

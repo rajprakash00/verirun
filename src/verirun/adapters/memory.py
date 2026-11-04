@@ -26,6 +26,7 @@ from verirun.adapters.rules import (
     duplicate_bill_error,
     duplicate_vendor_error,
     partial_payment_error,
+    reference_marker,
     require_positive_amount,
 )
 
@@ -154,10 +155,10 @@ class InMemoryAccountingSystem(AccountingSystem):
         gr_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> Bill:
-        del idempotency_key  # a process-local store already sees its own bills
         require_positive_amount(amount_cents)
         po_id = po_id or None
         gr_id = gr_id or None
+        marker = reference_marker(idempotency_key)
         if vendor_id not in self._vendors:
             raise NotFoundError(f"no vendor '{vendor_id}' in the accounting system")
         duplicate = next(
@@ -169,6 +170,8 @@ class InMemoryAccountingSystem(AccountingSystem):
             None,
         )
         if duplicate is not None:
+            if marker and duplicate.reference == marker:
+                return duplicate
             raise duplicate_bill_error(
                 number=number,
                 vendor_id=vendor_id,
@@ -209,6 +212,7 @@ class InMemoryAccountingSystem(AccountingSystem):
             currency=currency,
             status="received",
             received_at=_now(),
+            reference=marker,
         )
         self._bills[bill.id] = bill
         return bill

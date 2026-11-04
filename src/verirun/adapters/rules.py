@@ -16,6 +16,11 @@ def money(cents: int, currency: str) -> str:
     return f"{cents / 100:,.2f} {currency}"
 
 
+def reference_marker(idempotency_key: str | None) -> str:
+    """The marker an adapter stores to recognise its own earlier write."""
+    return f"verirun:{idempotency_key}" if idempotency_key else ""
+
+
 def require_positive_amount(amount_cents: int) -> None:
     if amount_cents <= 0:
         raise ConflictError(

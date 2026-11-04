@@ -78,7 +78,7 @@ def settings_for(tmp_path: Path, ledgerlite_db: Path, maildesk_state) -> Setting
 
 def run_cli(settings: Settings, script: ScriptedClient, capsys) -> tuple[int, str, RunStore, str]:
     code = main(
-        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing"],
+        ["run", "Process the invoices in the AP mailbox", "--task", "invoice-processing", "--wait"],
         settings=settings,
         client=script,
     )

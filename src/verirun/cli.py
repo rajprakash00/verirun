@@ -13,12 +13,12 @@ from verirun.context.company import (
 from verirun.context.models import WorkOrder
 from verirun.context.task_pack import TaskPackError, load_task_pack
 from verirun.engine.models import CheckResult
-from verirun.engine.orchestrator import report_run, run_task
+from verirun.engine.orchestrator import report_run, validate_task_pack
 from verirun.engine.states import RunState
 from verirun.llm.client import LLMClient, build_client
 from verirun.runs.models import Escalation, Run
 from verirun.runs.store import RunStore, generate_run_id
-from verirun.runtime import Backends, live_registry, sync_mail
+from verirun.worker import Worker, enqueue_start
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,9 +28,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run = subparsers.add_parser("run", help="start a Run from a Request")
+    run = subparsers.add_parser("run", help="queue a Run from a Request")
     run.add_argument("request", help="the short request, for example: process the invoices")
     run.add_argument("--task", default=None, help="Task Pack id, for example: invoice-processing")
+    run.add_argument(
+        "--wait",
+        action="store_true",
+        help="run the queue in this process until the new Run rests",
+    )
+
+    worker = subparsers.add_parser("worker", help="execute queued Runs with leases")
+    worker.add_argument("--once", action="store_true", help="run one queued job and exit")
+    worker.add_argument(
+        "--max-items", type=int, default=None, help="stop after this many jobs"
+    )
+    worker.add_argument(
+        "--poll-interval", type=float, default=5.0, help="seconds to wait when idle"
+    )
+    worker.add_argument(
+        "--lease-seconds", type=int, default=None, help="how long a claim is held"
+    )
 
     serve = subparsers.add_parser("serve", help="serve the local dashboard")
     serve.add_argument("--host", default="127.0.0.1", help="interface to bind (default 127.0.0.1)")
@@ -110,6 +127,8 @@ def main(
     args = build_parser().parse_args(argv)
     if args.command == "run":
         return _run_command(args, settings, client)
+    if args.command == "worker":
+        return _worker_command(args, settings, client)
     if args.command == "serve":
         return _serve_command(args, settings)
     if args.command == "report":
@@ -142,6 +161,25 @@ def _serve_command(args: argparse.Namespace, settings: Settings | None) -> int:
     return 0
 
 
+def _worker_command(
+    args: argparse.Namespace, settings: Settings | None, client: LLMClient | None
+) -> int:
+    from verirun.worker import main as worker_main
+
+    argv = ["--max-items", str(args.max_items)] if args.max_items is not None else []
+    if args.once:
+        argv.append("--once")
+    argv.extend(["--poll-interval", str(args.poll_interval)])
+    if args.lease_seconds is not None:
+        argv.extend(["--lease-seconds", str(args.lease_seconds)])
+    factory = (lambda _run_id: client) if client is not None else None
+    return worker_main(
+        argv,
+        settings=settings or Settings(),
+        client_factory=factory,
+    )
+
+
 def _run_command(
     args: argparse.Namespace, settings: Settings | None, client: LLMClient | None
 ) -> int:
@@ -155,29 +193,26 @@ def _run_command(
     try:
         context = load_company_context(settings.company_dir)
         task_pack = load_task_pack(settings.tasks_dir / f"{args.task}.yaml")
-        run_id = generate_run_id()
-        llm = client or build_client(settings, session_id=run_id)
-        store = RunStore(settings.run_db)
-        backends = Backends.from_settings(settings)
-        sync_mail(backends)
-        with live_registry(
-            settings, context, task_pack, llm, run_id, backends=backends
-        ) as registry:
-            run = run_task(
-                args.request,
-                task_pack,
-                context,
-                llm,
-                store,
-                registry,
-                accounting=backends.verifier_accounting,
-                shared_root=backends.mail.document_root,
-                evidence_root=settings.run_db.parent,
-                max_steps=settings.max_steps,
-                max_cost_usd=settings.max_cost_usd,
-                prices=settings.prices,
-                run_id=run_id,
+        validate_task_pack(task_pack, context)
+        store, run_id = enqueue_start(
+            settings,
+            args.request,
+            args.task,
+            run_id=generate_run_id(),
+        )
+        if args.wait:
+            llm = client or build_client(settings, session_id=run_id)
+            worker = Worker(
+                settings,
+                store=store,
+                client_factory=lambda _run_id: llm,
             )
+            while True:
+                item = worker.run_once()
+                if item is None:
+                    break
+                if item.run_id == run_id and store.active_queue_item(run_id) is None:
+                    break
     except (CompanyContextError, TaskPackError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -185,6 +220,13 @@ def _run_command(
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    run = store.get_run(run_id)
+    if not args.wait:
+        print(f"Run {run.id} queued ({run.state.value}) with task {run.task_id}.")
+        print("Start a worker to execute it: verirun worker")
+        return 0
+    if run.error:
+        print(f"error: {run.error}", file=sys.stderr)
     evidence_path = settings.run_db.parent / run.id / "evidence.json"
     print(
         format_run(
@@ -200,7 +242,7 @@ def _run_command(
 def _report_command(args: argparse.Namespace, settings: Settings | None) -> int:
     settings = settings or Settings()
     try:
-        store = RunStore(settings.run_db)
+        store = RunStore.for_settings(settings)
         run = store.get_run(args.run_id)
         path = report_run(run.id, store, settings.run_db.parent)
     except Exception as exc:  # noqa: BLE001 - the CLI reports any report failure and exits cleanly

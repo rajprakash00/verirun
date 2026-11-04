@@ -214,6 +214,26 @@
   </div>
   {% endif %}
 
+  {% if evidence.exceptions %}
+  <div class="card">
+    <h2>Exceptions</h2>
+    <table>
+      <thead><tr><th>Kind</th><th>Summary</th><th>Evidence</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for exception in evidence.exceptions %}
+        <tr>
+          <td><code>{{ exception.kind }}</code></td>
+          <td>{{ exception.summary }}<div class="muted">{{ exception.question }}</div></td>
+          <td><code>{{ exception.evidence | tojson }}</code></td>
+          <td><span class="badge {{ 'ok' if exception.status == 'resolved' else 'bad' }}">{{ exception.status }}</span>
+            {% if exception.resolution %}<div class="muted">{{ exception.resolution }}</div>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <div class="card">
     <h2>Verification</h2>
     {% if evidence.verification %}

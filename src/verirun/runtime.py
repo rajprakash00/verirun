@@ -397,6 +397,7 @@ def live_registry(
     run_id: str,
     *,
     backends: Backends,
+    store: RunStore | None = None,
 ) -> Iterator[ToolRegistry]:
     """The registry for a live Run, shared by the CLI and the dashboard.
 
@@ -412,7 +413,7 @@ def live_registry(
         prices=settings.prices,
     )
     facts = run_policy_facts(
-        RunStore(settings.run_db),
+        store or RunStore.for_settings(settings),
         run_id,
         task_pack,
         accounting=backends.accounting,
