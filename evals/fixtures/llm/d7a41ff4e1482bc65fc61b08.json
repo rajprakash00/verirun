@@ -1,0 +1,29 @@
+{
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the invoice extraction step of Verirun. You read India GST supplier\ninvoices and return their fields as JSON. You never guess: you report only what\nthe document shows, quote the exact line that supports every value, and state\nhow certain you are of each field.\n"
+      },
+      {
+        "role": "user",
+        "content": "Read the India GST invoice text and reply with one JSON object that follows this JSON schema exactly:\n{\n  \"$defs\": {\n    \"ExtractedField\": {\n      \"additionalProperties\": false,\n      \"description\": \"One field: the value, the model's confidence, and the supporting quote.\",\n      \"properties\": {\n        \"value\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": null,\n          \"title\": \"Value\"\n        },\n        \"confidence\": {\n          \"maximum\": 1.0,\n          \"minimum\": 0.0,\n          \"title\": \"Confidence\",\n          \"type\": \"number\"\n        },\n        \"citation\": {\n          \"anyOf\": [\n            {\n              \"type\": \"string\"\n            },\n            {\n              \"type\": \"null\"\n            }\n          ],\n          \"default\": null,\n          \"title\": \"Citation\"\n        }\n      },\n      \"required\": [\n        \"confidence\"\n      ],\n      \"title\": \"ExtractedField\",\n      \"type\": \"object\"\n    }\n  },\n  \"additionalProperties\": false,\n  \"description\": \"The strict schema the extraction model must return.\",\n  \"properties\": {\n    \"supplier_name\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"supplier_gstin\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"invoice_number\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"invoice_date\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"taxable_amount\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"cgst\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"sgst\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"igst\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"total\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"hsn_sac\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"po_reference\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"due_date\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    },\n    \"currency\": {\n      \"$ref\": \"#/$defs/ExtractedField\"\n    }\n  },\n  \"required\": [\n    \"supplier_name\",\n    \"supplier_gstin\",\n    \"invoice_number\",\n    \"invoice_date\",\n    \"taxable_amount\",\n    \"cgst\",\n    \"sgst\",\n    \"igst\",\n    \"total\",\n    \"hsn_sac\",\n    \"po_reference\",\n    \"due_date\",\n    \"currency\"\n  ],\n  \"title\": \"IndiaInvoiceFields\",\n  \"type\": \"object\"\n}\nRules:\n- Read only what the document shows. Never guess a value.\n- Every field has \"value\", \"confidence\" (0 to 1), and \"citation\".\n- \"citation\" must be the exact line from the invoice that supports the value, copied character for character. Use null when there is no value.\n- Required fields: supplier_name, supplier_gstin, invoice_number, invoice_date, taxable_amount, total, currency. Use null only when the document does not show the field at all.\n- Amounts are digits, commas, and a decimal point only, for example \"10,000.00\", with no currency symbol or code.\n- Dates are copied as printed, for example \"05/09/2026\".\n- cgst, sgst, and igst are the tax amounts, not the tax rates. Use null for a component the invoice does not charge.\n- hsn_sac and po_reference are the identifiers printed on the invoice, or null when the invoice does not cite one.\n- currency is the ISO code, for example \"INR\".\n\nInvoice text:\nTAX INVOICE\nSupplier: Paper Trail Supplies Pvt Ltd\nGSTIN: 29AABCV1234C1ZQ\nInvoice number: PTS/2026/0146\nInvoice date: 05/09/2026\nDue date: 05/10/2026\nHSN/SAC: 4820\nTaxable amount: 8,000.00\nCGST 9%: 720.00\nSGST 9%: 720.00\nIGST: 0.00\nTotal: 9,440.00 INR"
+      }
+    ],
+    "tools": [],
+    "response_format": {
+      "type": "json_object"
+    }
+  },
+  "response": {
+    "model": "deepseek-v4-pro",
+    "text": "{\"supplier_name\": {\"value\": \"Paper Trail Supplies Pvt Ltd\", \"confidence\": 0.98, \"citation\": \"Supplier: Paper Trail Supplies Pvt Ltd\"}, \"supplier_gstin\": {\"value\": \"29AABCV1234C1ZQ\", \"confidence\": 0.99, \"citation\": \"GSTIN: 29AABCV1234C1ZQ\"}, \"invoice_number\": {\"value\": \"PTS/2026/0146\", \"confidence\": 0.99, \"citation\": \"Invoice number: PTS/2026/0146\"}, \"invoice_date\": {\"value\": \"05/09/2026\", \"confidence\": 0.97, \"citation\": \"Invoice date: 05/09/2026\"}, \"due_date\": {\"value\": \"05/10/2026\", \"confidence\": 0.95, \"citation\": \"Due date: 05/10/2026\"}, \"taxable_amount\": {\"value\": \"8,000.00\", \"confidence\": 0.98, \"citation\": \"Taxable amount: 8,000.00\"}, \"cgst\": {\"value\": \"720.00\", \"confidence\": 0.98, \"citation\": \"CGST 9%: 720.00\"}, \"sgst\": {\"value\": \"720.00\", \"confidence\": 0.98, \"citation\": \"SGST 9%: 720.00\"}, \"igst\": {\"value\": \"0.00\", \"confidence\": 0.97, \"citation\": \"IGST: 0.00\"}, \"total\": {\"value\": \"9,440.00\", \"confidence\": 0.98, \"citation\": \"Total: 9,440.00 INR\"}, \"hsn_sac\": {\"value\": \"4820\", \"confidence\": 0.96, \"citation\": \"HSN/SAC: 4820\"}, \"currency\": {\"value\": \"INR\", \"confidence\": 0.99, \"citation\": \"Total: 9,440.00 INR\"}, \"po_reference\": {\"value\": null, \"confidence\": 0.0, \"citation\": null}}",
+    "tool_calls": [],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

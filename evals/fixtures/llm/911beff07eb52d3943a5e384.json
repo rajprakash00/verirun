@@ -1,0 +1,155 @@
+{
+  "request": {
+    "model": "deepseek-v4.1-flash",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Execute phase of Verirun. You finish one Step of the Plan at a\ntime by calling tools, one tool call per turn. After every call you observe the\nresult and decide the next move.\n\nRules:\n- Call only the tools allowed for the current Step, one at a time.\n- Read each observation. If a call failed, adapt: try another tool or another\n  argument.\n- Never repeat a call whose side effect already succeeded.\n- Approval gates are automatic: when you call a tool the policy gates, the Run\n  parks for a human decision and resumes with their answer. Call the gated tool\n  to request approval; never try to wait for or collect the decision yourself,\n  and never record, write, or invent one.\n- When the Step's done criterion is met, reply with a short summary and no tool\n  call. That finishes the Step and moves to the next one.\n- If the Step cannot be finished, say so plainly in your summary.\n"
+      },
+      {
+        "role": "user",
+        "content": "Run EVAL-INDIA-HAPPY\nWork Order goal: Process the tax invoice PTS/2026/0142\nStep 2 of 4 ('step-2')\nStep goal: Match the supplier GSTIN and purchase order\nDone criterion: The vendor and purchase order are known, or the mismatch is recorded\nAllowed tools: erp.list_vendors, erp.list_purchase_orders, erp.get_purchase_order\nResults from earlier Steps (use these facts; do not repeat a completed side effect):\n- Step 1 mail.read [ok]: Read message 'MSG-IN-INDIA_HAPPY' from Paper Trail Accounts\n  data: {\"attachments\": [{\"content_type\": \"application/pdf\", \"filename\": \"PTS-2026-0142.pdf\", \"id\": \"8bd32c5ce8421b0dfca375af5a640eb44bfc41cc6d5db9bf9f0310b836273c32\", \"path\": \"documents/invoices/PTS-2026-0142.pdf\", \"size_bytes\": 1231}], \"body\": \"Hello,\\n\\nPlease process the attached tax invoice PTS/2026/0142.\\n\\nRegards,\\nPaper Trail Accounts\", \"folder\": \"inbox\", \"id\": \"MSG-IN-INDIA_HAPPY\", \"received_at\": \"2026-09-05T09:00:00+00:00\", \"scenario\": \"india_happy\", \"sender\": \"Paper Trail Accounts\", \"sender_email\": \"accounts@papertrail.example\", \"subject\": \"Tax invoice PTS/2026/0142 from Paper Trail Supplies Pvt Ltd\"}\n- Step 1 invoice.extract [ok]: Extracted 13 field(s) from 'documents/invoices/PTS-2026-0142.pdf' with citations (lowest confidence 0.95)\n  data: {\"cost_usd\": 0.0022175999999999997, \"fields\": {\"cgst_paise\": {\"citation\": \"CGST 9%: 720.00\", \"confidence\": 0.98, \"value\": 72000}, \"currency\": {\"citation\": \"Total: 9,440.00 INR\", \"confidence\": 0.99, \"value\": \"INR\"}, \"due_date\": {\"citation\": \"Due date: 05/10/2026\", \"confidence\": 0.95, \"value\": \"2026-10-05\"}, \"hsn_sac\": {\"citation\": \"HSN/SAC: 4820\", \"confidence\": 0.96, \"value\": \"4820\"}, \"igst_paise\": {\"citation\": \"IGST: 0.00\", \"confidence\": 0.97, \"value\": 0}, \"invoice_date\": {\"citation\": \"Invoice date: 05/09/2026\", \"confidence\": 0.97, \"value\": \"2026-09-05\"}, \"invoice_number\": {\"citation\": \"Invoice number: PTS/2026/0142\", \"confidence\": 0.99, \"value\": \"PTS/2026/0142\"}, \"po_reference\": {\"citation\": \"Purchase order: PO-IN-2001\", \"confidence\": 0.97, \"value\": \"PO-IN-2001\"}, \"sgst_paise\": {\"citation\": \"SGST 9%: 720.00\", \"confidence\": 0.98, \"value\": 72000}, \"supplier_gstin\": {\"citation\": \"GSTIN: 29AABCV1234C1ZQ\", \"confidence\": 0.99, \"value\": \"29AABCV1234C1ZQ\"}, \"supplier_name\": {\"citation\": \"Supplier: Paper Trail Supplies Pvt Ltd\", \"confidence\": 0.98, \"value\": \"Paper Trail Supplies Pvt Ltd\"}, \"taxable_amount_paise\": {\"citation\": \"Taxable amount: 8,000.00\", \"confidence\": 0.98, \"value\": 800000}, \"total_paise\": {\"citation\": \"Total: 9,440.00 INR\", \"confidence\": 0.98, \"value\": 944000}}, \"low_confidence\": false, \"low_confidence_fields\": [], \"method\": \"text\", \"min_confidence\": 0.95, \"pages\": 1, \"parsed\": {\"currency\": \"INR\", \"invoice_date\": \"2026-09-05\", \"invoice_number\": \"PTS/2026/0142\", \"po_reference\": \"PO-IN-2001\", \"supplier_gstin\": \"29AABCV1234C1ZQ\", \"supplier_name\": \"Paper Trail Supplies Pvt Ltd\", \"total_paise\": 944000}, \"path\": \"documents/invoices/PTS-2026-0142.pdf\", \"schema\": \"india-gst\", \"threshold\": 0.8, \"usage\": {\"by_model\": {\"deepseek-v4-pro\": 0.002218}, \"cached_tokens\": 0, \"completion_tokens\": 60, \"prompt_tokens\": 1500, \"unknown_models\": [], \"usd\": 0.002218}, \"validations\": [{\"detail\": \"GSTIN 29AABCV1234C1ZQ is well formed and its check digit is valid\", \"id\": \"gstin_checksum\", \"ok\": true}, {\"detail\": \"taxable 8,000.00 INR + CGST 720.00 INR + SGST 720.00 INR + IGST 0.00 INR = 9,440.00 INR; invoice total is 9,440.00 INR\", \"id\": \"tax_sum\", \"ok\": true}, {\"detail\": \"CGST 720.00 INR equals SGST 720.00 INR\", \"id\": \"tax_split\", \"ok\": true}]}"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "c3",
+            "type": "function",
+            "function": {
+              "name": "erp.list_vendors",
+              "arguments": "{\"status\": \"active\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c3",
+        "content": "{\"ok\":true,\"summary\":\"Listed 1 vendor(s)\",\"data\":{\"vendors\":[{\"id\":\"V-IN-1001\",\"name\":\"Paper Trail Supplies Pvt Ltd\",\"tax_id\":\"29AABCV1234C1ZQ\",\"email\":\"accounts@papertrail.example\",\"address\":\"14 Market Road, Bengaluru\",\"status\":\"active\",\"created_at\":\"2026-09-01T09:00:00+00:00\",\"scenario\":\"\"}]},\"error_kind\":null,\"artifacts\":[]}"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "c4",
+            "type": "function",
+            "function": {
+              "name": "erp.list_purchase_orders",
+              "arguments": "{\"vendor_id\": \"V-IN-1001\"}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "c4",
+        "content": "{\"ok\":true,\"summary\":\"Listed 1 purchase order(s)\",\"data\":{\"purchase_orders\":[{\"id\":\"PO-IN-2001\",\"vendor_id\":\"V-IN-1001\",\"amount_cents\":944000,\"currency\":\"INR\",\"status\":\"open\",\"issued_at\":\"2026-09-01T09:00:00+00:00\",\"number\":\"PO-IN-2001\",\"scenario\":\"\"}]},\"error_kind\":null,\"artifacts\":[]}"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.list_vendors",
+          "description": "List vendors in LedgerLite, optionally filtered by status.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "description": "Filter by status: active, blocked, pending."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.list_purchase_orders",
+          "description": "List purchase orders in LedgerLite, optionally filtered by vendor or status.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "vendor_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "description": "open, closed, or cancelled."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "erp.get_purchase_order",
+          "description": "Fetch one purchase order by id.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "po_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "po_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "task.escalate",
+          "description": "Stop the Run and ask a human for help. Use when the Step cannot be completed safely and no tool can resolve it: a missing document or reference, an ambiguous instruction, or a condition you cannot fix. State the reason plainly and ask one specific question.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "description": "The blocking condition, stated plainly."
+              },
+              "question": {
+                "type": "string",
+                "description": "The one question for the human to answer."
+              }
+            },
+            "required": [
+              "reason",
+              "question"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    ],
+    "response_format": null
+  },
+  "response": {
+    "model": "deepseek-v4.1-flash",
+    "text": null,
+    "tool_calls": [
+      {
+        "id": "c5",
+        "name": "erp.get_purchase_order",
+        "arguments": {
+          "po_id": "PO-IN-2001"
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

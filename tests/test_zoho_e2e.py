@@ -289,6 +289,7 @@ def test_a_bill_over_the_threshold_parks_then_is_created_once(
     assert evidence["verified"] is True
     assert [check["id"] for check in evidence["verification"]["checks"]] == [
         "bill-filed",
+        "extraction-confidence",
         "accounting-invoice-matches",
         "source-archived",
     ]

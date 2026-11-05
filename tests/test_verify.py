@@ -1139,3 +1139,94 @@ def test_a_duplicate_match_still_fails_after_the_run_created_its_bill(
     result = store.get_verification("RUN-0001")[0]
     assert not result.ok
     assert "already" in result.detail
+
+
+def confidence_pack() -> TaskPack:
+    return TaskPack(
+        id="confidence-test",
+        goal_template="Check the extraction confidence",
+        sop="india-gst-extraction",
+        tools=["invoice.extract"],
+        extraction={"confidence_threshold": 0.8},
+        verification=[
+            VerificationCheck(
+                id="extraction-confidence",
+                description="The extraction meets the threshold or a human approved it.",
+                check="extraction_confidence",
+            )
+        ],
+    )
+
+
+def seed_low_confidence_extraction(store: RunStore) -> None:
+    store.add_observation(
+        "RUN-0001",
+        Observation(
+            ok=True,
+            summary="Extracted the India GST invoice below the threshold",
+            data={
+                "parsed": dict(INDIA_PARSED),
+                "min_confidence": 0.62,
+                "low_confidence": True,
+            },
+        ),
+        tool="invoice.extract",
+    )
+
+
+def test_a_low_confidence_extraction_without_approval_fails_the_confidence_check(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_low_confidence_extraction(store)
+
+    run = verify_run(
+        "RUN-0001",
+        confidence_pack(),
+        store,
+        accounting=india_accounting(),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.FAILED
+    result = store.get_verification("RUN-0001")[0]
+    assert not result.ok
+    assert "below the Task Pack threshold" in result.detail
+
+
+def test_an_approved_low_confidence_extraction_passes_the_confidence_check(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_low_confidence_extraction(store)
+    request = store.create_approval(
+        "RUN-0001",
+        key="bill-1",
+        step_position=0,
+        step_id="step-1",
+        tool="erp.file_invoice",
+        action="bill.create",
+        arguments={"number": INVOICE_NUMBER, "vendor_id": "V-IN-1001"},
+        policy="india-ap",
+        rule="low-confidence-extraction-needs-approval",
+    )
+    store.decide_approval(request.id, approved=True)
+    store.mark_approval_executed(request.id)
+
+    run = verify_run(
+        "RUN-0001",
+        confidence_pack(),
+        store,
+        accounting=india_accounting(),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.COMPLETED
+    result = store.get_verification("RUN-0001")[0]
+    assert result.ok
+    assert (
+        f"approval:{INVOICE_NUMBER}:low-confidence-extraction-needs-approval"
+        in result.evidence
+    )

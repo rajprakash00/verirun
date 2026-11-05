@@ -10,9 +10,19 @@ from verirun.eval.models import (
     EvalTotals,
     ScenarioReport,
 )
-from verirun.eval.scenarios import SCENARIOS, SILENT_FAILURE_SCENARIOS, Scenario
+from verirun.eval.scenarios import (
+    ALL_SCENARIOS,
+    INDIA_CHECKS,
+    INDIA_SCENARIOS,
+    SCENARIOS,
+    SILENT_FAILURE_SCENARIOS,
+    Scenario,
+)
 
 __all__ = [
+    "ALL_SCENARIOS",
+    "INDIA_CHECKS",
+    "INDIA_SCENARIOS",
     "SCENARIOS",
     "SILENT_FAILURE_SCENARIOS",
     "AblationCase",

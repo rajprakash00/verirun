@@ -232,7 +232,9 @@ The `india_bill_matches` check re-reads the source tax invoice from its PDF, ind
 of the executor's extraction, and compares the bill that this Run created: exactly one
 bill, the vendor and GSTIN, the invoice number, amount, currency, GSTIN check digit, tax
 arithmetic, the purchase order when the bill cites one, and the source document. The
-Evidence Pack records the approval decision, the journaled write with its idempotency
+`extraction_confidence` check records whether every extraction met the Task Pack's
+confidence threshold, or cites the approved low-confidence bill when a human released it.
+The Evidence Pack records the approval decision, the journaled write with its idempotency
 key, and these verification results.
 
 The eval harness has two eval-only switches that the product paths leave at their defaults.
@@ -241,6 +243,15 @@ no Evidence Pack for that Run; disabling the Approval Gates lets a `require_appr
 decision execute, while `forbid` decisions still deny. The harness runs both ablations beside
 the baseline and reports caught failures, undetected failures, and gated versus ungated
 irreversible actions. See ADR 0006.
+
+`verirun eval --task invoice-processing-in` selects the eight India GST scenarios. They run
+the same engine and Task Pack against an in-memory `MailSource` and `AccountingSystem`, with
+a text-layer invoice PDF per case, so the eval is deterministic and needs no Mock Suite
+database or external system. The scenarios cover the happy path, duplicate invoice, GSTIN
+mismatch, tax mismatch, missing required purchase order, over-limit bill, low-confidence
+extraction, and a transient accounting failure. The report asserts each scenario's terminal
+state, verification per criterion, human interventions, steps, cost, and latency; any
+unexpected outcome makes the command exit non-zero.
 
 ## 8. Reliability and state
 
