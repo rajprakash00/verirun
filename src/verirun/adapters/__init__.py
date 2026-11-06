@@ -22,7 +22,7 @@ from verirun.adapters.base import (
 )
 from verirun.adapters.folder import WatchedFolderSource
 from verirun.adapters.imap import ImapSource
-from verirun.adapters.memory import InMemoryAccountingSystem
+from verirun.adapters.memory import InMemoryAccountingSystem, InMemoryMailSource
 from verirun.adapters.mock import MockAccountingSystem, MockMailSource
 from verirun.adapters.zoho import (
     ZohoAccountingReads,
@@ -43,6 +43,7 @@ __all__ = [
     "GoodsReceipt",
     "ImapSource",
     "InMemoryAccountingSystem",
+    "InMemoryMailSource",
     "MailAttachment",
     "MailMessage",
     "MailSource",

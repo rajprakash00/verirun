@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from verirun.config import Settings
-from verirun.eval import format_report, run_eval
+from verirun.eval import INDIA_SCENARIOS, format_report, run_eval
 from verirun.llm.client import ReplayClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,9 +47,17 @@ def main() -> int:
         ),
     )
     print(format_report(report))
+    india = run_eval(
+        settings,
+        scenarios=INDIA_SCENARIOS,
+        client_factory=lambda settings, scenario: ReplayClient(
+            settings, mode="record", inner=scenario.script()
+        ),
+    )
+    print(format_report(india))
     recorded = len(list(FIXTURE_DIR.glob("*.json")))
     print(f"Recorded {recorded} fixture(s) into {FIXTURE_DIR.relative_to(ROOT)}")
-    return 0 if report.passed else 1
+    return 0 if report.passed and india.passed else 1
 
 
 if __name__ == "__main__":

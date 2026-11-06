@@ -39,6 +39,7 @@ from verirun.tools.vision import read_scanned_invoice
 
 LIVE_BILL_STATUSES = frozenset({"received", "approved", "paid"})
 PAYMENT_STATUSES = frozenset({"scheduled", "paid"})
+LOW_CONFIDENCE_RULE = "low-confidence-extraction-needs-approval"
 
 FILE_FIELD = re.compile(r"^Vendor:\s*(.+)$", re.MULTILINE)
 NUMBER_FIELD = re.compile(r"^Invoice number:\s*(\S+)$", re.MULTILINE)
@@ -615,6 +616,73 @@ def check_india_bill_matches(
     )
 
 
+def check_extraction_confidence(
+    params: dict[str, Any], context: VerificationContext
+) -> CheckOutcome:
+    """The extraction meets the threshold, or a human approved its low confidence.
+
+    A low-confidence extraction is not a failed extraction: the Task Pack's
+    Approval Gate is the human review. This check proves that such a bill was
+    actually approved, and that a normal extraction cleared the threshold.
+    """
+    threshold = context.confidence_threshold
+    if threshold is None:
+        return CheckOutcome(
+            True, "the Task Pack sets no extraction confidence threshold"
+        )
+    rule = str(params.get("approval_rule") or LOW_CONFIDENCE_RULE)
+    extractions = [
+        record
+        for record in context.store.list_observations(context.run.id)
+        if record.tool == INVOICE_EXTRACT_TOOL and record.ok
+    ]
+    if not extractions:
+        return CheckOutcome(
+            False,
+            f"no successful {INVOICE_EXTRACT_TOOL} action is recorded on this Run",
+        )
+    approvals = [
+        request
+        for request in context.store.list_approvals(context.run.id)
+        if request.rule == rule
+        and request.status == "approved"
+        and request.executed_at is not None
+    ]
+    approved_numbers = {
+        str(request.arguments.get("number"))
+        for request in approvals
+        if request.arguments.get("number")
+    }
+    failures: list[str] = []
+    evidence: list[str] = []
+    for record in extractions:
+        data = record.data or {}
+        minimum = data.get("min_confidence")
+        parsed = data.get("parsed") or {}
+        number = parsed.get("invoice_number") or f"observation {record.id}"
+        low = bool(data.get("low_confidence")) or (
+            isinstance(minimum, (int, float)) and minimum < threshold
+        )
+        if not low:
+            evidence.append(f"extraction:{number}@{minimum}")
+            continue
+        if number in approved_numbers:
+            evidence.append(f"approval:{number}:{rule}")
+            continue
+        failures.append(
+            f"{number}: extraction confidence {minimum} is below the Task Pack "
+            f"threshold {threshold} and no low-confidence bill was approved"
+        )
+    if failures:
+        return CheckOutcome(False, "; ".join(failures), tuple(evidence))
+    return CheckOutcome(
+        True,
+        f"{len(extractions)} extraction(s) meet the confidence threshold "
+        f"{threshold:.2f}, or a human approved the low-confidence bill",
+        tuple(evidence),
+    )
+
+
 def _india_reference_failures(
     context: VerificationContext, invoice: Bill, source_reference: str | None
 ) -> list[str]:
@@ -836,6 +904,7 @@ CHECKS: dict[str, CheckFunction] = {
     "erp_invoice_matches": check_erp_invoice_matches,
     "erp_payment_state": check_erp_payment_state,
     "erp_vendor_matches": check_erp_vendor_matches,
+    "extraction_confidence": check_extraction_confidence,
     "file_archived": check_file_archived,
     "india_bill_matches": check_india_bill_matches,
 }

@@ -268,6 +268,7 @@ def test_fixture_mailbox_becomes_a_verified_evidence_pack(tmp_path: Path) -> Non
     assert evidence["verification"]["passed"] is True
     assert [check["id"] for check in evidence["verification"]["checks"]] == [
         "bill-filed",
+        "extraction-confidence",
         "accounting-invoice-matches",
         "source-archived",
     ]

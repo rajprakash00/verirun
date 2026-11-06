@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
         "eval", help="run the seeded scenarios in replay mode and write a report"
     )
     eval_parser.add_argument(
+        "--task",
+        default=None,
+        help="run only the eval scenarios for one Task Pack, for example invoice-processing-in",
+    )
+    eval_parser.add_argument(
         "--report",
         type=Path,
         default=Path("runs/eval/report.json"),
@@ -268,6 +273,7 @@ def _eval_command(args: argparse.Namespace) -> int:
     try:
         report = run_eval(
             settings,
+            task=args.task,
             browser=args.browser,
             verifier=args.verifier,
             approval_gates=args.approval_gates,

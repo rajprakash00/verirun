@@ -11,10 +11,20 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
+from pathlib import Path
 from typing import Any
 
 from verirun.engine.states import RunState
+from verirun.eval.india import (
+    INDIA_CASES,
+    VENDOR_ID,
+    InvoiceCase,
+    build_india_backends,
+    extraction_json,
+)
 from verirun.llm.client import AssistantTurn, LLMClient, Message, ToolCall, Usage
+from verirun.runtime import Backends
 
 MODEL_FOR_ROLE = {
     "loop": "deepseek-v4.1-flash",
@@ -804,11 +814,13 @@ class Scenario:
     expected_failed_checks: tuple[str, ...] = ()
     escalations: int = 0
     approvals: int = 0
+    approval_rule: str | None = None
     resumed: bool = False
     regrounded: bool = False
     retried_tool: str | None = None
     escalation_reason: str | None = None
     needs_browser: bool = False
+    backends: Callable[[Path], Backends] | None = None
 
     @property
     def run_id(self) -> str:
@@ -857,6 +869,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         parked_state=RunState.AWAITING_APPROVAL,
         approval=True,
         approvals=1,
+        approval_rule="approval-threshold",
         resumed=True,
         checks=INVOICE_CHECKS,
     ),
@@ -918,6 +931,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         parked_state=RunState.AWAITING_APPROVAL,
         approval=True,
         approvals=1,
+        approval_rule="vendor-creation-needs-approval",
         resumed=True,
         checks=VENDOR_CHECKS,
     ),
@@ -963,3 +977,218 @@ SILENT_FAILURE_SCENARIOS: tuple[Scenario, ...] = (
         expected_failed_checks=("invoice-filed",),
     ),
 )
+
+
+INDIA_CHECKS = (
+    "bill-filed",
+    "extraction-confidence",
+    "accounting-invoice-matches",
+    "source-archived",
+)
+
+
+def india_work_order(goal: str) -> dict[str, Any]:
+    return {
+        "sop": "india-gst-extraction",
+        "goal": goal,
+        "assumptions": [
+            "The AP mailbox is the source of truth for the invoice",
+            "The accounting system of record holds the vendor and purchase order",
+        ],
+        "systems": ["maildesk", "ledgerlite", "files"],
+        "policies": ["india-ap"],
+        "approval_gates": [
+            {
+                "id": "bill-approval-threshold",
+                "description": "A purchase bill above 10,000.00 INR waits for a human",
+                "policy": "india-ap",
+            },
+            {
+                "id": "bill-vendor-differs-from-extraction",
+                "description": "A bill for a different or unmatched vendor waits for a human",
+                "policy": "india-ap",
+            },
+            {
+                "id": "missing-purchase-order-needs-approval",
+                "description": "A bill without its purchase order waits for a human",
+                "policy": "india-ap",
+            },
+            {
+                "id": "low-confidence-extraction-needs-approval",
+                "description": "A low-confidence extraction waits for a human",
+                "policy": "india-ap",
+            },
+        ],
+        "success_criteria": [
+            "The invoice fields are extracted with citations and GST validations",
+            "Exactly one purchase bill exists in the accounting system",
+            "The source invoice is archived in processed",
+        ],
+        "open_questions": [],
+    }
+
+
+INDIA_PLAN = {
+    "steps": [
+        {
+            "id": "step-1",
+            "goal": "Read the invoice email and extract its India GST fields",
+            "allowed_tools": ["mail.read", "invoice.extract"],
+            "done_criterion": "Every field has a citation and the GST validations are recorded",
+        },
+        {
+            "id": "step-2",
+            "goal": "Match the supplier GSTIN and purchase order",
+            "allowed_tools": [
+                "erp.list_vendors",
+                "erp.list_purchase_orders",
+                "erp.get_purchase_order",
+            ],
+            "done_criterion": (
+                "The vendor and purchase order are known, or the mismatch is recorded"
+            ),
+        },
+        {
+            "id": "step-3",
+            "goal": "Create the purchase bill after any approval",
+            "allowed_tools": ["erp.file_invoice"],
+            "done_criterion": "Exactly one purchase bill exists",
+        },
+        {
+            "id": "step-4",
+            "goal": "Archive the source invoice",
+            "allowed_tools": ["files.archive"],
+            "done_criterion": "The source is in processed",
+        },
+    ]
+}
+
+
+def india_file_turn(case: InvoiceCase) -> AssistantTurn:
+    arguments: dict[str, Any] = {
+        "number": case.invoice_number,
+        "vendor_id": VENDOR_ID,
+        "amount": case.total_paise / 100,
+        "currency": "INR",
+    }
+    if case.po_reference:
+        arguments["po_id"] = case.po_reference
+    return tool_turn("erp.file_invoice", arguments, call_id="c6")
+
+
+def india_script(case_key: str) -> StageClient:
+    """The deterministic model turns for one India GST case."""
+    case = INDIA_CASES[case_key]
+    replies: list[str | AssistantTurn] = [
+        json.dumps(india_work_order(f"Process the tax invoice {case.invoice_number}")),
+        json.dumps(INDIA_PLAN),
+        tool_turn("mail.read", {"message_id": case.message_id}, call_id="c1"),
+        tool_turn("invoice.extract", {"path": case.attachment_path}, call_id="c2"),
+        extraction_json(case),
+        text_turn("Extracted the invoice with citations and GST validations."),
+        tool_turn("erp.list_vendors", {"status": "active"}, call_id="c3"),
+        tool_turn("erp.list_purchase_orders", {"vendor_id": VENDOR_ID}, call_id="c4"),
+    ]
+    if case.po_reference:
+        replies.extend(
+            [
+                tool_turn(
+                    "erp.get_purchase_order",
+                    {"po_id": case.po_reference},
+                    call_id="c5",
+                ),
+                text_turn("The supplier and purchase order are known."),
+            ]
+        )
+    else:
+        replies.append(text_turn("No purchase order is on file for this supplier."))
+    replies.append(india_file_turn(case))
+    if case_key == "india_duplicate":
+        # The fake accounting system rejects the second bill by vendor and
+        # number; the engine escalates on that duplicate, so no further turns
+        # are needed.
+        return StageClient(replies)
+    replies.extend(
+        [
+            text_turn("Created the purchase bill."),
+            tool_turn(
+                "files.archive",
+                {"path": case.attachment_path, "directory": "processed"},
+                call_id="c7",
+            ),
+            text_turn("Archived the source invoice."),
+        ]
+    )
+    return StageClient(replies)
+
+
+def _india_scenario(case_key: str, **overrides: Any) -> Scenario:
+    case = INDIA_CASES[case_key]
+    values: dict[str, Any] = {
+        "key": case_key,
+        "title": case.title,
+        "task_id": "invoice-processing-in",
+        "request": f"Process the tax invoice {case.invoice_number} from the AP mailbox",
+        "script": partial(india_script, case_key),
+        "expected_state": RunState.COMPLETED,
+        "checks": INDIA_CHECKS,
+        "backends": partial(build_india_backends, case),
+    }
+    values.update(overrides)
+    return Scenario(**values)
+
+
+INDIA_SCENARIOS: tuple[Scenario, ...] = (
+    _india_scenario("india_happy"),
+    _india_scenario(
+        "india_duplicate",
+        expected_state=RunState.NEEDS_HUMAN,
+        escalations=1,
+        escalation_reason="duplicate invoice",
+        checks=(),
+    ),
+    _india_scenario(
+        "india_gstin_mismatch",
+        expected_state=RunState.FAILED,
+        parked_state=RunState.AWAITING_APPROVAL,
+        approval=True,
+        approvals=1,
+        approval_rule="bill-vendor-differs-from-extraction",
+        resumed=True,
+        expected_failed_checks=("bill-filed", "accounting-invoice-matches"),
+    ),
+    _india_scenario(
+        "india_tax_mismatch",
+        expected_state=RunState.FAILED,
+        expected_failed_checks=("bill-filed",),
+    ),
+    _india_scenario(
+        "india_missing_po",
+        parked_state=RunState.AWAITING_APPROVAL,
+        approval=True,
+        approvals=1,
+        approval_rule="missing-purchase-order-needs-approval",
+        resumed=True,
+    ),
+    _india_scenario(
+        "india_over_limit",
+        parked_state=RunState.AWAITING_APPROVAL,
+        approval=True,
+        approvals=1,
+        approval_rule="bill-approval-threshold",
+        resumed=True,
+    ),
+    _india_scenario(
+        "india_low_confidence",
+        parked_state=RunState.AWAITING_APPROVAL,
+        approval=True,
+        approvals=1,
+        approval_rule="low-confidence-extraction-needs-approval",
+        resumed=True,
+    ),
+    _india_scenario("india_transient", retried_tool="erp.file_invoice"),
+)
+
+
+ALL_SCENARIOS: tuple[Scenario, ...] = (*SCENARIOS, *INDIA_SCENARIOS)
+

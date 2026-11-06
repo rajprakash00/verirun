@@ -15,7 +15,7 @@
         "content": "",
         "tool_calls": [
           {
-            "id": "approval-2",
+            "id": "approval-1",
             "type": "function",
             "function": {
               "name": "erp.create_vendor",
@@ -26,7 +26,7 @@
       },
       {
         "role": "tool",
-        "tool_call_id": "approval-2",
+        "tool_call_id": "approval-1",
         "content": "{\"ok\":true,\"summary\":\"Created vendor V-1009 (Cascade Fabrication LLC) with tax id TAX-2001\",\"data\":{\"vendor_id\":\"V-1009\",\"name\":\"Cascade Fabrication LLC\",\"tax_id\":\"TAX-2001\",\"email\":\"accounts@cascade-fabrication.example\",\"address\":\"4820 Foundry Way, Portland, OR 97210\",\"status\":\"active\"},\"error_kind\":null,\"artifacts\":[]}"
       }
     ],

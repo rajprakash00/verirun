@@ -19,6 +19,8 @@ class ApprovalOutcome(BaseModel):
     action: str
     status: str
     executed: bool
+    policy: str | None = None
+    rule: str | None = None
 
 
 class EscalationOutcome(BaseModel):
@@ -45,6 +47,7 @@ class ScenarioReport(BaseModel):
     human_interventions: int = 0
     steps: int = 0
     cost_usd: float = 0.0
+    latency_ms: float = 0.0
     actions: list[str] = Field(default_factory=list)
     resumed: bool = False
     resume_correct: bool | None = None
@@ -97,6 +100,7 @@ class EvalTotals(BaseModel):
     completed: int = 0
     steps: int = 0
     cost_usd: float = 0.0
+    latency_ms: float = 0.0
 
 
 class EvalReport(BaseModel):
@@ -108,6 +112,7 @@ class EvalReport(BaseModel):
     browser: bool
     verifier: bool = True
     approval_gates: bool = True
+    task: str | None = None
     scenarios: list[ScenarioReport] = Field(default_factory=list)
     totals: EvalTotals = Field(default_factory=EvalTotals)
     ablations: AblationReport | None = None

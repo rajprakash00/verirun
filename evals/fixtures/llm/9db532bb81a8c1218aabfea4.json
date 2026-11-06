@@ -1,0 +1,29 @@
+{
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are the Plan phase of Verirun. You turn a Work Order into an ordered plan\nof Steps. You never act and never call tools.\n\nReturn a single JSON object:\n{\n  \"steps\": [\n    {\n      \"id\": string,\n      \"goal\": string,\n      \"allowed_tools\": [string],\n      \"done_criterion\": string\n    }\n  ]\n}\n\nRules:\n- Each Step is one piece of work, ordered from first to last.\n- \"allowed_tools\" may only contain tool names from the Task Pack allowlist. Use\n  the smallest set of tools that can finish the Step.\n- The plan must cover every success criterion in the Work Order and follow the SOP.\n- Approval gates are engine mechanics, not Steps: plan the gated action itself,\n  for example scheduling an over-limit payment. Calling it parks the Run for a\n  human decision automatically, and the Run resumes with the answer. Never plan\n  a Step whose work is waiting for, collecting, or recording a human decision.\n- \"id\" is a short unique slug, for example \"step-1\", numbered in order.\n- \"done_criterion\" is a checkable statement that says when the Step is finished.\n- Reply with JSON only: no prose, no markdown.\n"
+      },
+      {
+        "role": "user",
+        "content": "Work Order (JSON):\n{\n  \"sop\": \"india-gst-extraction\",\n  \"goal\": \"Process the tax invoice PTS/2026/0144\",\n  \"assumptions\": [\n    \"The AP mailbox is the source of truth for the invoice\",\n    \"The accounting system of record holds the vendor and purchase order\"\n  ],\n  \"systems\": [\n    \"maildesk\",\n    \"ledgerlite\",\n    \"files\"\n  ],\n  \"policies\": [\n    \"india-ap\"\n  ],\n  \"approval_gates\": [\n    {\n      \"id\": \"bill-approval-threshold\",\n      \"description\": \"A purchase bill above 10,000.00 INR waits for a human\",\n      \"policy\": \"india-ap\"\n    },\n    {\n      \"id\": \"bill-vendor-differs-from-extraction\",\n      \"description\": \"A bill for a different or unmatched vendor waits for a human\",\n      \"policy\": \"india-ap\"\n    },\n    {\n      \"id\": \"missing-purchase-order-needs-approval\",\n      \"description\": \"A bill without its purchase order waits for a human\",\n      \"policy\": \"india-ap\"\n    },\n    {\n      \"id\": \"low-confidence-extraction-needs-approval\",\n      \"description\": \"A low-confidence extraction waits for a human\",\n      \"policy\": \"india-ap\"\n    }\n  ],\n  \"success_criteria\": [\n    \"The invoice fields are extracted with citations and GST validations\",\n    \"Exactly one purchase bill exists in the accounting system\",\n    \"The source invoice is archived in processed\"\n  ],\n  \"open_questions\": []\n}\n\nTool allowlist:\n[\n  \"mail.list\",\n  \"mail.read\",\n  \"mail.mark_read\",\n  \"files.list\",\n  \"files.read\",\n  \"invoice.extract\",\n  \"files.archive\",\n  \"erp.list_vendors\",\n  \"erp.get_vendor\",\n  \"erp.list_purchase_orders\",\n  \"erp.get_purchase_order\",\n  \"erp.list_invoices\",\n  \"erp.get_invoice\",\n  \"erp.file_invoice\"\n]\n\nSOP id: india-gst-extraction\n\nTask Pack goal template: Turn supplier invoice emails from the AP mailbox into a reviewable India GST extraction with per-field citations and GST validations, match the supplier and purchase order against Zoho Books, create one purchase bill after any required human approval, and archive the source document. Request: {request}"
+      }
+    ],
+    "tools": [],
+    "response_format": {
+      "type": "json_object"
+    }
+  },
+  "response": {
+    "model": "deepseek-v4-pro",
+    "text": "{\"steps\": [{\"id\": \"step-1\", \"goal\": \"Read the invoice email and extract its India GST fields\", \"allowed_tools\": [\"mail.read\", \"invoice.extract\"], \"done_criterion\": \"Every field has a citation and the GST validations are recorded\"}, {\"id\": \"step-2\", \"goal\": \"Match the supplier GSTIN and purchase order\", \"allowed_tools\": [\"erp.list_vendors\", \"erp.list_purchase_orders\", \"erp.get_purchase_order\"], \"done_criterion\": \"The vendor and purchase order are known, or the mismatch is recorded\"}, {\"id\": \"step-3\", \"goal\": \"Create the purchase bill after any approval\", \"allowed_tools\": [\"erp.file_invoice\"], \"done_criterion\": \"Exactly one purchase bill exists\"}, {\"id\": \"step-4\", \"goal\": \"Archive the source invoice\", \"allowed_tools\": [\"files.archive\"], \"done_criterion\": \"The source is in processed\"}]}",
+    "tool_calls": [],
+    "usage": {
+      "prompt_tokens": 1500,
+      "completion_tokens": 60,
+      "cached_tokens": 0
+    }
+  }
+}

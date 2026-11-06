@@ -90,6 +90,7 @@ def test_eval_report_matches_known_outcomes(
     assert report.passed is True
     assert report.mode == "replay"
     assert report.browser is False
+    assert report.task is None
     assert len(report.scenarios) == len(SCENARIOS) == 12
     by_key = {scenario.key: scenario for scenario in report.scenarios}
 
@@ -107,6 +108,7 @@ def test_eval_report_matches_known_outcomes(
     assert happy.verification_passed is True
     assert happy.steps > 0
     assert happy.cost_usd > 0
+    assert happy.latency_ms > 0
     assert happy.human_interventions == 0
 
     transient = by_key["transient"]
@@ -148,6 +150,7 @@ def test_eval_report_matches_known_outcomes(
     assert totals.completed == 5
     assert totals.steps == sum(scenario.steps for scenario in report.scenarios)
     assert totals.cost_usd > 0
+    assert totals.latency_ms > 0
 
     restored = EvalReport.model_validate_json(report.model_dump_json())
     assert restored == report

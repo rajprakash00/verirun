@@ -1,10 +1,11 @@
 """Run the seeded eval scenarios in replay mode and write a report.
 
-The harness seeds the real Mock Suite per scenario, drives every Run end to
-end on the unchanged engine with a replayed LLM client, applies the human
-decisions the scenario needs, and asserts the known terminal outcome. Every
-scenario is independent: a crash in one becomes a failed ScenarioReport, never
-a traceback.
+The harness seeds each scenario in its own universe: the Mock Suite for the
+US task packs, or an in-memory mail and accounting fake for the India GST
+cases. It drives every Run end to end on the unchanged engine with a replayed
+LLM client, applies the human decisions the scenario needs, and asserts the
+known terminal outcome. Every scenario is independent: a crash in one becomes
+a failed ScenarioReport, never a traceback.
 """
 
 from __future__ import annotations
@@ -37,11 +38,16 @@ from verirun.eval.models import (
     EvalTotals,
     ScenarioReport,
 )
-from verirun.eval.scenarios import SCENARIOS, SILENT_FAILURE_SCENARIOS, Scenario
+from verirun.eval.scenarios import (
+    ALL_SCENARIOS,
+    SCENARIOS,
+    SILENT_FAILURE_SCENARIOS,
+    Scenario,
+)
 from verirun.llm.client import LLMClient, ReplayClient
 from verirun.runs.models import ObservationRecord, Run
 from verirun.runs.store import RunStore
-from verirun.runtime import Backends, build_registry
+from verirun.runtime import Backends, build_registry, run_policy_facts
 from verirun.tools import BrowserSession
 
 LEDGERLITE_PORT = 8002
@@ -52,7 +58,8 @@ ClientFactory = Callable[[Settings, Scenario], LLMClient]
 def run_eval(
     settings: Settings,
     *,
-    scenarios: Sequence[Scenario] = SCENARIOS,
+    scenarios: Sequence[Scenario] | None = None,
+    task: str | None = None,
     browser: bool = True,
     client_factory: ClientFactory | None = None,
     verifier: bool = True,
@@ -60,14 +67,19 @@ def run_eval(
 ) -> EvalReport:
     """Run the seeded scenarios, seeded and replayed, and report the outcomes.
 
-    By default the report also contrasts the baseline with two eval-only
-    ablations: the Verifier disabled, and the Approval Gates disabled. Passing
+    Passing ``task`` selects the scenarios for one Task Pack, for example
+    ``invoice-processing-in`` for the India GST cases. By default the report
+    also contrasts the Mock Suite baseline with two eval-only ablations: the
+    Verifier disabled, and the Approval Gates disabled. Passing
     ``verifier=False`` or ``approval_gates=False`` runs just that ablation and
     reports its raw outcomes. Neither switch exists on the product paths.
     """
+    if scenarios is not None and task is not None:
+        raise ValueError("pass either scenarios or task, not both")
     factory = client_factory or _replay_client_factory
-    is_default_run = tuple(scenarios) == tuple(SCENARIOS)
-    scenarios = (*scenarios, *SILENT_FAILURE_SCENARIOS) if is_default_run else scenarios
+    selected = tuple(scenarios) if scenarios is not None else _scenarios_for_task(task)
+    is_default_run = task is None and selected == tuple(SCENARIOS)
+    scenarios = (*selected, *SILENT_FAILURE_SCENARIOS) if is_default_run else selected
 
     if not verifier or not approval_gates:
         return _run_pass(
@@ -78,6 +90,7 @@ def run_eval(
             verifier=verifier,
             approval_gates=approval_gates,
             check_expectations=False,
+            task=task,
         )
 
     baseline = _run_pass(
@@ -87,6 +100,7 @@ def run_eval(
         client_factory=factory,
         verifier=True,
         approval_gates=True,
+        task=task,
     )
     if not is_default_run:
         return baseline
@@ -114,6 +128,27 @@ def run_eval(
     return _with_ablations(baseline, verifier_off, gates_off)
 
 
+def _scenarios_for_task(task: str | None) -> tuple[Scenario, ...]:
+    """The scenarios the eval runs: the Mock Suite baseline by default."""
+    if task is None:
+        return SCENARIOS
+    selected = tuple(scenario for scenario in ALL_SCENARIOS if scenario.task_id == task)
+    if not selected:
+        raise ValueError(f"no eval scenarios for Task Pack '{task}'")
+    return selected
+
+
+def _clear_run_store(settings: Settings) -> None:
+    """Remove the SQLite run store, including its WAL files.
+
+    Every scenario is an independent seed. Its natural-key claims must not leak
+    into the next scenario, or a later Run would be refused a bill that the
+    freshly seeded accounting system no longer has.
+    """
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{settings.run_db}{suffix}").unlink(missing_ok=True)
+
+
 def _run_pass(
     settings: Settings,
     *,
@@ -124,11 +159,10 @@ def _run_pass(
     approval_gates: bool,
     check_expectations: bool = True,
     evidence_root: Path | None = None,
+    task: str | None = None,
 ) -> EvalReport:
-    settings.run_db.unlink(missing_ok=True)
     context = load_company_context(settings.company_dir)
     evidence_root = evidence_root or settings.run_db.parent
-
     reports: list[ScenarioReport] = []
     runnable: list[Scenario] = []
     for scenario in scenarios:
@@ -166,6 +200,7 @@ def _run_pass(
         browser=browser,
         verifier=verifier,
         approval_gates=approval_gates,
+        task=task,
         scenarios=ordered,
         totals=totals,
         passed=totals.failed == 0,
@@ -183,31 +218,40 @@ def write_report(report: EvalReport, path: str | Path) -> Path:
 def format_report(report: EvalReport) -> str:
     """A one-line summary plus one line per scenario, for the terminal."""
     totals = report.totals
+    scope = f"task {report.task}, " if report.task else ""
     switches = (
         f"verifier {'on' if report.verifier else 'off'}, "
         f"gates {'on' if report.approval_gates else 'off'}"
     )
     lines = [
         (
-            f"Eval ({report.mode}, {switches}, browser "
+            f"Eval ({report.mode}, {scope}{switches}, browser "
             f"{'on' if report.browser else 'off'}): "
             f"{totals.passed}/{totals.scenarios} passed · {totals.failed} failed · "
             f"{totals.skipped} skipped · {totals.completed} completed · "
-            f"{totals.steps} steps · ${totals.cost_usd:.4f}"
+            f"{totals.steps} steps · ${totals.cost_usd:.4f} · "
+            f"{totals.latency_ms / 1000:.2f}s"
         )
     ]
     for scenario in report.scenarios:
         mark = "skip" if scenario.skipped else ("pass" if scenario.passed else "FAIL")
         state = scenario.state.value if scenario.state is not None else "(not run)"
         checks = (
-            f"{sum(1 for check in scenario.verification if check.ok)}"
-            f"/{len(scenario.verification)} checks"
+            "no verification"
+            if not scenario.verification
+            else (
+                f"{sum(1 for check in scenario.verification if check.ok)}"
+                f"/{len(scenario.verification)} checks"
+            )
         )
         lines.append(
             f"  [{mark}] {scenario.key}: {state} · {checks} · "
             f"{scenario.human_interventions} human · {scenario.steps} steps · "
-            f"${scenario.cost_usd:.4f}"
+            f"${scenario.cost_usd:.4f} · {scenario.latency_ms:.0f} ms"
         )
+        for check in scenario.verification:
+            check_mark = "pass" if check.ok else "FAIL"
+            lines.append(f"         [{check_mark}] {check.id}: {check.detail}")
         for problem in scenario.problems:
             lines.append(f"         problem: {problem}")
     if report.ablations is not None:
@@ -330,6 +374,7 @@ def _run_scenario(
         expected_state=scenario.expected_state,
         parked_state=scenario.parked_state,
     )
+    started = time.perf_counter()
     try:
         _drive_scenario(
             settings,
@@ -344,6 +389,8 @@ def _run_scenario(
         )
     except Exception as exc:  # noqa: BLE001 - a crashed scenario is a failed report
         report.problems.append(f"scenario crashed: {type(exc).__name__}: {exc}")
+    finally:
+        report.latency_ms = (time.perf_counter() - started) * 1000
     report.passed = not report.skipped and not report.problems
     return report
 
@@ -361,8 +408,13 @@ def _drive_scenario(
     evidence_root: Path,
 ) -> None:
     task_pack = load_task_pack(settings.tasks_dir / f"{scenario.task_id}.yaml")
-    reset_and_seed_suite(settings.erp_db, settings.mail_db, settings.shared_dir)
+    if scenario.backends is not None:
+        backends = scenario.backends(evidence_root / scenario.run_id)
+    else:
+        reset_and_seed_suite(settings.erp_db, settings.mail_db, settings.shared_dir)
+        backends = Backends.mock_suite(settings)
     client = client_factory(settings, scenario)
+    _clear_run_store(settings)
     store = RunStore(settings.run_db)
     session = None
     if scenario.needs_browser:
@@ -372,7 +424,6 @@ def _drive_scenario(
             prices=settings.prices,
         )
     try:
-        backends = Backends.mock_suite(settings)
         registry = build_registry(
             settings,
             context,
@@ -381,6 +432,12 @@ def _drive_scenario(
             backends=backends,
             browser=session,
             approval_gates=approval_gates,
+            policy_facts=run_policy_facts(
+                store,
+                scenario.run_id,
+                task_pack,
+                accounting=backends.accounting,
+            ),
         )
         run = run_task(
             scenario.request,
@@ -454,6 +511,8 @@ def _collect(
             action=request.action,
             status=request.status,
             executed=request.executed_at is not None,
+            policy=request.policy,
+            rule=request.rule,
         )
         for request in store.list_approvals(run.id)
     ]
@@ -519,6 +578,13 @@ def _expectation_problems(
         problems.append(
             f"{len(report.approvals)} approval(s), expected {scenario.approvals}"
         )
+    if scenario.approval_rule is not None and not any(
+        request.rule == scenario.approval_rule for request in report.approvals
+    ):
+        rules = sorted({request.rule or "" for request in report.approvals})
+        problems.append(
+            f"approval rules {rules}, expected {scenario.approval_rule!r}"
+        )
     for request in report.approvals:
         if request.status != "approved":
             problems.append(
@@ -554,6 +620,7 @@ def _totals(reports: Sequence[ScenarioReport]) -> EvalTotals:
         completed=sum(1 for report in reports if report.state is RunState.COMPLETED),
         steps=sum(report.steps for report in reports),
         cost_usd=sum(report.cost_usd for report in reports),
+        latency_ms=sum(report.latency_ms for report in reports),
     )
 
 

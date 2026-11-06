@@ -85,6 +85,13 @@ verification:
       tax invoice.
     check: india_bill_matches
     params: {}
+  - id: extraction-confidence
+    description: >-
+      The extraction meets the Task Pack confidence threshold, or a human
+      approved the low-confidence purchase bill at its Approval Gate.
+    check: extraction_confidence
+    params:
+      approval_rule: low-confidence-extraction-needs-approval
   - id: accounting-invoice-matches
     description: >-
       The extracted invoice resolves to one vendor with the same GSTIN and name,

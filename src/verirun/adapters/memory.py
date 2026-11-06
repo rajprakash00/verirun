@@ -1,24 +1,31 @@
-"""An in-memory accounting system for deterministic engine and crash tests.
+"""In-memory mail and accounting fakes for deterministic engine and crash tests.
 
-No database, no network, no Mock Suite. The fake enforces the same business
-rules as the Mock Suite adapter: duplicate bills are rejected, bill amounts must
-agree with their purchase order and goods receipt, and a payment covers the
-whole bill.
+No database, no network, no Mock Suite. The accounting fake enforces the same
+business rules as the Mock Suite adapter: duplicate bills are rejected, bill
+amounts must agree with their purchase order and goods receipt, and a payment
+covers the whole bill. The mail fake carries one or more messages whose
+attachments live under a real document root, so file tools and the Verifier
+still read real bytes.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from verirun.adapters.base import (
     AccountingSystem,
     Approval,
     Bill,
     GoodsReceipt,
+    MailMessage,
+    MailSource,
+    MailSummary,
     NotFoundError,
     Payment,
     PurchaseOrder,
+    TransientError,
     Vendor,
 )
 from verirun.adapters.rules import (
@@ -29,6 +36,77 @@ from verirun.adapters.rules import (
     reference_marker,
     require_positive_amount,
 )
+
+
+class InMemoryMailSource(MailSource):
+    """A mailbox held in dictionaries with attachments under a real root.
+
+    The document root is a real directory because ``invoice.extract`` and the
+    Verifier read the attachment bytes themselves. Messages and read state are
+    in memory, so a scenario starts from a clean mailbox every time.
+    """
+
+    def __init__(
+        self,
+        document_root: str | Path,
+        messages: Iterable[MailMessage] = (),
+    ) -> None:
+        self._root = Path(document_root)
+        self._messages = {message.id: message for message in messages}
+        self._read_at: dict[str, str] = {}
+
+    @property
+    def document_root(self) -> Path:
+        return self._root
+
+    def list_messages(self, folder: str = "inbox") -> list[MailSummary]:
+        summaries = [
+            MailSummary(
+                id=message.id,
+                folder=message.folder,
+                sender=message.sender,
+                sender_email=message.sender_email,
+                subject=message.subject,
+                received_at=message.received_at,
+                attachment_count=len(message.attachments),
+                unread=message.id not in self._read_at,
+                scenario=message.scenario,
+            )
+            for message in self._messages.values()
+            if message.folder == folder
+        ]
+        return sorted(
+            summaries,
+            key=lambda message: (message.received_at, message.id),
+            reverse=True,
+        )
+
+    def read_message(self, message_id: str) -> MailMessage:
+        message = self._messages.get(message_id)
+        if message is None:
+            raise NotFoundError(f"no message '{message_id}' in the mailbox")
+        return message
+
+    def read_attachment(self, message_id: str, attachment_id: str) -> bytes:
+        message = self.read_message(message_id)
+        attachment = next(
+            (item for item in message.attachments if item.id == attachment_id),
+            None,
+        )
+        if attachment is None:
+            raise NotFoundError(
+                f"no attachment '{attachment_id}' on message '{message_id}'"
+            )
+        path = self._root / attachment.path
+        if not path.is_file():
+            raise NotFoundError(f"attachment file not found: {attachment.path}")
+        return path.read_bytes()
+
+    def mark_read(self, message_id: str) -> str:
+        self.read_message(message_id)
+        return self._read_at.setdefault(
+            message_id, datetime.now(UTC).isoformat(timespec="seconds")
+        )
 
 
 class InMemoryAccountingSystem(AccountingSystem):
@@ -48,6 +126,7 @@ class InMemoryAccountingSystem(AccountingSystem):
         bills: Iterable[Bill] = (),
         payments: Iterable[Payment] = (),
         approvals: Iterable[Approval] = (),
+        transient_bill_failures: int = 0,
     ) -> None:
         self._vendors = {item.id: item for item in vendors}
         self._purchase_orders = {item.id: item for item in purchase_orders}
@@ -55,6 +134,9 @@ class InMemoryAccountingSystem(AccountingSystem):
         self._bills = {item.id: item for item in bills}
         self._payments = {item.id: item for item in payments}
         self._approvals = {item.id: item for item in approvals}
+        # The next N bill writes fail before landing, so engine tests can prove
+        # the transient retry path against the same interface as a real system.
+        self._transient_bill_failures = transient_bill_failures
 
     # Reads -----------------------------------------------------------------
 
@@ -156,6 +238,12 @@ class InMemoryAccountingSystem(AccountingSystem):
         idempotency_key: str | None = None,
     ) -> Bill:
         require_positive_amount(amount_cents)
+        if self._transient_bill_failures > 0:
+            self._transient_bill_failures -= 1
+            raise TransientError(
+                "the accounting system is temporarily unavailable; retry the bill",
+                data={"transient": True},
+            )
         po_id = po_id or None
         gr_id = gr_id or None
         marker = reference_marker(idempotency_key)

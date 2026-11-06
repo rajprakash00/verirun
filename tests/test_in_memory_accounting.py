@@ -11,12 +11,15 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from tests.support import ROOT, WORK_ORDER, ScriptedClient, text_turn, tool_turn
 from verirun.adapters import (
     GoodsReceipt,
     InMemoryAccountingSystem,
     MockMailSource,
     PurchaseOrder,
+    TransientError,
     Vendor,
 )
 from verirun.config import Settings
@@ -54,7 +57,7 @@ PLAN = {
 }
 
 
-def in_memory_accounting() -> InMemoryAccountingSystem:
+def in_memory_accounting(*, transient_bill_failures: int = 0) -> InMemoryAccountingSystem:
     return InMemoryAccountingSystem(
         vendors=[
             Vendor(
@@ -87,6 +90,7 @@ def in_memory_accounting() -> InMemoryAccountingSystem:
                 received_at=CREATED_AT,
             )
         ],
+        transient_bill_failures=transient_bill_failures,
     )
 
 
@@ -177,3 +181,24 @@ def test_the_engine_completes_against_the_in_memory_accounting_fake(
     payments = accounting.list_payments(FILED_INVOICE_ID)
     assert [payment.amount_cents for payment in payments] == [125_000]
     assert (shared_root / "processed" / "NW-2026-001.pdf").is_file()
+
+
+def test_the_in_memory_fake_fails_one_bill_write_transiently() -> None:
+    accounting = in_memory_accounting(transient_bill_failures=1)
+    arguments = {
+        "number": "NW-2026-001",
+        "vendor_id": "V-1001",
+        "amount_cents": 125_000,
+        "currency": "USD",
+        "po_id": "PO-2001",
+        "gr_id": "GR-2501",
+    }
+
+    with pytest.raises(TransientError):
+        accounting.create_purchase_bill(**arguments)
+
+    bill = accounting.create_purchase_bill(**arguments)
+
+    assert bill.number == "NW-2026-001"
+    assert accounting.list_bills(number="NW-2026-001") == [bill]
+

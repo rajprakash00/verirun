@@ -282,12 +282,36 @@ Output on this repository (`uv run verirun eval`):
 | Forbidden payment to a blocked vendor | `needs_human` with the policy denial | still `needs_human` with the policy denial |
 
 The same harness asserts per-Run metrics: terminal state, verification results
-per criterion, human interventions, steps, cost, resume correctness, and
-completed actions. It exits non-zero when any scenario misses its known outcome,
-so a prompt, model, or Task Pack change is judged in one command. Pass
+per criterion, human interventions, steps, cost, latency, resume correctness,
+and completed actions. It exits non-zero when any scenario misses its known
+outcome, so a prompt, model, or Task Pack change is judged in one command. Pass
 `--no-browser` to skip the browser re-grounding scenario when Chromium is not
 installed, or `--report`, `--state-dir`, `--shared`, `--runs`, and `--fixtures`
 to relocate state.
+
+The India GST Task Pack has its own eight scenarios. They run against the
+in-memory mail and accounting fakes instead of LedgerLite, so they exercise the
+product adapter seam without a Mock Suite database or a network:
+
+| Scenario | Expected outcome |
+| --- | --- |
+| Happy path | `completed`; all four checks pass |
+| Duplicate invoice | `needs_human` with the existing bill id |
+| Supplier GSTIN mismatch | `awaiting_approval`, then `failed`: `bill-filed` and `accounting-invoice-matches` catch the vendor GSTIN |
+| GST tax arithmetic mismatch | `failed`: `bill-filed` catches the tax arithmetic |
+| Missing required purchase order | `awaiting_approval`, then `completed` after a human yes |
+| Over-limit purchase bill | `awaiting_approval`, then `completed` after a human yes |
+| Low-confidence extraction | `awaiting_approval`, then `completed`; `extraction-confidence` records the human approval |
+| Transient Zoho failure | retried, then `completed`; all four checks pass |
+
+```bash
+uv run verirun eval --task invoice-processing-in --no-browser
+```
+
+The JSON report names the selected Task Pack, and every scenario carries its
+terminal state, each verification criterion, the approval and escalation
+decisions, steps, cost, and wall-clock latency.
+
 
 The eval-only ablations are not product switches: `--no-verifier` and
 `--no-approval-gates` exist only on `eval`. Neither exists on `run`, `serve`, or

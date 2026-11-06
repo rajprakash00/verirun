@@ -271,6 +271,7 @@ def test_shipped_india_pack_is_valid() -> None:
     assert pack.requires_purchase_order is True
     assert [check.id for check in pack.verification] == [
         "bill-filed",
+        "extraction-confidence",
         "accounting-invoice-matches",
         "source-archived",
     ]
