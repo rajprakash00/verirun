@@ -100,8 +100,12 @@ verification:
     check: accounting_invoice_matches
     params:
       require_purchase_order: false
+      # Zoho Books flips a purchase order from open to billed (normalised to
+      # closed) as soon as this Run's bill exists, so a successful write must
+      # still match its order.
       purchase_order_statuses:
         - open
+        - closed
   - id: source-archived
     description: The source invoice document is in the processed archive.
     check: file_archived

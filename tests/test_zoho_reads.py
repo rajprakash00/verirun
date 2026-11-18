@@ -248,6 +248,7 @@ def test_a_retry_with_the_same_key_returns_the_bill_instead_of_posting_again() -
     second = accounting.create_purchase_bill(**arguments)
 
     assert second.id == first.id
+    assert second.po_id == PO_ID
     assert len(fake.posts) == 1
 
 

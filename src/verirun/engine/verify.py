@@ -100,7 +100,14 @@ def _invoice_for_claim(
             f"{context.accounting.display_name} has {len(bills)} invoice(s) numbered "
             f"{number} for {vendor_id}, expected one"
         )
-    return bills[0], None
+    bill = bills[0]
+    # A list endpoint may return a summary: Zoho Books omits the purchase-order
+    # link from GET /bills. The filed bill is the claim's subject, so read its
+    # full record before judging it.
+    try:
+        return context.accounting.get_bill(bill.id), None
+    except NotFoundError:
+        return bill, None
 
 
 def _claimed_bill_id(

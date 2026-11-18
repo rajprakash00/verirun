@@ -266,7 +266,7 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
         duplicate = self._existing_bill(number=number, vendor_id=vendor_id)
         if duplicate is not None:
             if marker and duplicate.reference == marker:
-                return duplicate
+                return self._full_bill(duplicate)
             raise duplicate_bill_error(
                 number=number,
                 vendor_id=vendor_id,
@@ -313,19 +313,33 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
             except AdapterError:
                 reconciled = None
             if reconciled is not None:
-                return reconciled
+                return self._full_bill(reconciled)
             raise
         bill = payload.get("bill")
         if not isinstance(bill, dict):
             raise ConflictError("Zoho Books returned no bill after the write")
         created = _bill(bill)
         try:
-            return self.wait_for_bill(number=number, vendor_id=vendor_id)
+            found = self.wait_for_bill(number=number, vendor_id=vendor_id)
         except NotFoundError:
             # The create response is the authoritative record; a list endpoint
             # that has not caught up must not turn a completed write into a
             # retry.
-            return created
+            found = created
+        return self._full_bill(found)
+
+    def _full_bill(self, bill: Bill) -> Bill:
+        """The bill as its GET returns it, because list views are summaries.
+
+        Zoho Books omits the purchase-order link from GET /bills, so a Bill
+        mapped from a list item loses ``po_id``. The journal and the Evidence
+        Pack need the linked order; a failed detail read falls back to the
+        summary rather than failing a completed write.
+        """
+        try:
+            return self.get_bill(bill.id)
+        except NotFoundError:
+            return bill
 
     def _purchase_order_line(self, po_id: str) -> tuple[str, str]:
         """The item and tax a bill line takes from the purchase order.
