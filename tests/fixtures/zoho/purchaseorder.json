@@ -10,6 +10,16 @@
     "currency_code": "INR",
     "status": "open",
     "billed_status": "unbilled",
-    "date": "2026-09-01"
+    "date": "2026-09-01",
+    "line_items": [
+      {
+        "line_item_id": "4600000000102",
+        "item_id": "4600000000090",
+        "name": "Paper Supplies",
+        "rate": 11800.0,
+        "quantity": 1.0,
+        "tax_id": "4600000000077"
+      }
+    ]
   }
 }

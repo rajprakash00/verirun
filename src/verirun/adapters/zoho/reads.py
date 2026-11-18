@@ -223,6 +223,10 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
     names an item, and the write token cannot list the chart of accounts. The
     operator therefore supplies the expense account once; without it the
     adapter refuses the write before any POST instead of letting Zoho reject it.
+
+    Zoho links a bill to a purchase order only through a common item, so a
+    PO-linked bill takes ``item_id`` from the PO's single line instead and
+    sends no account. Multi-line POs need a real line mapping and are rejected.
     """
 
     def __init__(
@@ -251,12 +255,6 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
         gr_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> Bill:
-        if not self.bill_account_id:
-            raise ConflictError(
-                "Zoho Books needs an expense account for a bill line: set "
-                "VERIRUN_ZOHO_BILL_ACCOUNT_ID to the account id from Zoho Books "
-                "Settings -> Chart of Accounts"
-            )
         require_positive_amount(amount_cents)
         if gr_id:
             raise ConflictError(
@@ -274,19 +272,28 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
                 existing_id=duplicate.id,
                 existing_status=duplicate.status,
             )
+        item_id = self._purchase_order_item_id(po_id) if po_id else ""
+        if not item_id and not self.bill_account_id:
+            raise ConflictError(
+                "Zoho Books needs an expense account for a bill line without an "
+                "item: set VERIRUN_ZOHO_BILL_ACCOUNT_ID to the account id from "
+                "Zoho Books Settings -> Chart of Accounts"
+            )
+        line: dict[str, Any] = {
+            "name": f"Invoice {number}",
+            "rate": amount_cents / 100,
+            "quantity": 1,
+        }
+        if item_id:
+            line["item_id"] = item_id
+        else:
+            line["account_id"] = self.bill_account_id
         body: dict[str, Any] = {
             "vendor_id": vendor_id,
             "bill_number": number,
             "date": datetime.now(UTC).date().isoformat(),
             "currency_code": currency,
-            "line_items": [
-                {
-                    "name": f"Invoice {number}",
-                    "rate": amount_cents / 100,
-                    "quantity": 1,
-                    "account_id": self.bill_account_id,
-                }
-            ],
+            "line_items": [line],
         }
         if po_id:
             body["purchaseorder_ids"] = [po_id]
@@ -317,6 +324,43 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
             # that has not caught up must not turn a completed write into a
             # retry.
             return created
+
+    def _purchase_order_item_id(self, po_id: str) -> str:
+        """The item a bill line takes from the purchase order it links to.
+
+        Zoho refuses a bill-to-PO link when the two share no item. The write
+        token cannot list items, but it can read the PO the bill cites, so the
+        PO's single line is the item source. A PO with zero or several lines
+        cannot be mapped to one bill line yet, and a line without an item has
+        nothing to share; both are conflicts before any write.
+        """
+        payload = self.client.get(f"/purchaseorders/{po_id}")
+        order = payload.get("purchaseorder")
+        if not isinstance(order, dict):
+            raise NotFoundError(f"no purchase order '{po_id}' in Zoho Books")
+        raw_lines = order.get("line_items")
+        lines = (
+            [line for line in raw_lines if isinstance(line, dict)]
+            if isinstance(raw_lines, list)
+            else []
+        )
+        if not lines:
+            raise ConflictError(
+                f"Zoho Books purchase order {po_id} has no line items; "
+                "a purchase bill cannot be linked to it"
+            )
+        if len(lines) > 1:
+            raise ConflictError(
+                f"Zoho Books purchase order {po_id} has {len(lines)} line items; "
+                "multi-line purchase order mapping is not implemented"
+            )
+        item_id = _text(lines[0].get("item_id"))
+        if not item_id:
+            raise ConflictError(
+                f"Zoho Books purchase order {po_id} has one line with no item_id; "
+                "a purchase bill cannot be linked to it"
+            )
+        return item_id
 
     def _existing_bill(self, *, number: str, vendor_id: str) -> Bill | None:
         bills = self.list_bills(number=number, vendor_id=vendor_id)

@@ -25,6 +25,7 @@ from tests.india_fixture import (
 from tests.support import ROOT, ScriptedClient, text_turn, tool_turn
 from tests.zoho_fixture import (
     BILL_ACCOUNT_ID,
+    PO_ITEM_ID,
     VENDOR_ID,
     FakeTokens,
     ZohoBooksFake,
@@ -281,7 +282,8 @@ def test_a_bill_over_the_threshold_parks_then_is_created_once(
     assert len(fake.posts) == 1
     assert fake.posts[0]["bill_number"] == INVOICE_NUMBER
     assert fake.posts[0]["vendor_id"] == VENDOR_ID
-    assert fake.posts[0]["line_items"][0]["account_id"] == BILL_ACCOUNT_ID
+    assert fake.posts[0]["line_items"][0]["item_id"] == PO_ITEM_ID
+    assert "account_id" not in fake.posts[0]["line_items"][0]
     assert fake.posts[0]["purchaseorder_ids"] == [ZOHO_PO_ID]
     assert fake.posts[0]["reference_number"].startswith(
         "verirun:step-3:erp.file_invoice:"

@@ -16,6 +16,7 @@ import pytest
 from tests.zoho_fixture import (
     BILL_ACCOUNT_ID,
     PO_ID,
+    PO_ITEM_ID,
     VENDOR_ID,
     FakeTokens,
     ZohoBooksFake,
@@ -225,7 +226,8 @@ def test_a_purchase_bill_is_posted_once_with_its_key_and_purchase_order() -> Non
     assert body["purchaseorder_ids"] == [PO_ID]
     assert body["reference_number"] == "verirun:step-1:erp.file_invoice:abc123"
     assert body["line_items"][0]["rate"] == 11800.0
-    assert body["line_items"][0]["account_id"] == BILL_ACCOUNT_ID
+    assert body["line_items"][0]["item_id"] == PO_ITEM_ID
+    assert "account_id" not in body["line_items"][0]
 
 
 def test_a_retry_with_the_same_key_returns_the_bill_instead_of_posting_again() -> None:
@@ -353,6 +355,82 @@ def test_the_posted_bill_line_carries_the_expense_account() -> None:
     )
 
     assert fake.posts[0]["line_items"][0]["account_id"] == BILL_ACCOUNT_ID
+    assert "item_id" not in fake.posts[0]["line_items"][0]
+
+
+def test_a_po_bill_takes_the_item_and_needs_no_expense_account() -> None:
+    fake = ZohoBooksFake()
+    accounting = ZohoAccountingSystem(zoho_reads(fake))
+
+    accounting.create_purchase_bill(
+        number="PTS/2026/0142",
+        vendor_id=VENDOR_ID,
+        amount_cents=1_180_000,
+        currency="INR",
+        po_id=PO_ID,
+    )
+
+    line = fake.posts[0]["line_items"][0]
+    assert line["item_id"] == PO_ITEM_ID
+    assert "account_id" not in line
+
+
+def test_a_multi_line_purchase_order_is_rejected_before_any_write() -> None:
+    fake = ZohoBooksFake()
+    line = fixture("purchaseorder.json")["purchaseorder"]["line_items"][0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith(
+            f"/purchaseorders/{PO_ID}"
+        ):
+            order = fixture("purchaseorder.json")
+            order["purchaseorder"]["line_items"] = [
+                line,
+                {**line, "line_item_id": "4600000000103"},
+            ]
+            return httpx.Response(200, json=order)
+        return fake(request)
+
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler), bill_account_id=BILL_ACCOUNT_ID
+    )
+
+    with pytest.raises(ConflictError, match="multi-line"):
+        accounting.create_purchase_bill(
+            number="PTS/2026/0142",
+            vendor_id=VENDOR_ID,
+            amount_cents=1_180_000,
+            currency="INR",
+            po_id=PO_ID,
+        )
+    assert fake.posts == []
+
+
+def test_a_purchase_order_without_lines_is_rejected_before_any_write() -> None:
+    fake = ZohoBooksFake()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith(
+            f"/purchaseorders/{PO_ID}"
+        ):
+            order = fixture("purchaseorder.json")
+            order["purchaseorder"]["line_items"] = []
+            return httpx.Response(200, json=order)
+        return fake(request)
+
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler), bill_account_id=BILL_ACCOUNT_ID
+    )
+
+    with pytest.raises(ConflictError, match="no line items"):
+        accounting.create_purchase_bill(
+            number="PTS/2026/0142",
+            vendor_id=VENDOR_ID,
+            amount_cents=1_180_000,
+            currency="INR",
+            po_id=PO_ID,
+        )
+    assert fake.posts == []
 
 
 def test_an_empty_bill_account_is_rejected_before_any_write() -> None:
