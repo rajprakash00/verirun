@@ -218,12 +218,18 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
     before it repeats a write. A bill that exists without this Run's key is a
     duplicate, never adopted silently. An unknown write outcome is reconciled
     once and then raised for a human; it is never retried blindly.
+
+    A Zoho Books India bill line needs an expense ``account_id`` unless it
+    names an item, and the write token cannot list the chart of accounts. The
+    operator therefore supplies the expense account once; without it the
+    adapter refuses the write before any POST instead of letting Zoho reject it.
     """
 
     def __init__(
         self,
         reads: ZohoAccountingReads,
         *,
+        bill_account_id: str = "",
         sleep: Callable[[float], None] | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
@@ -232,6 +238,7 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
             sleep=sleep or reads._sleep,
             clock=clock or reads._clock,
         )
+        self.bill_account_id = bill_account_id.strip()
 
     def create_purchase_bill(
         self,
@@ -244,6 +251,12 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
         gr_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> Bill:
+        if not self.bill_account_id:
+            raise ConflictError(
+                "Zoho Books needs an expense account for a bill line: set "
+                "VERIRUN_ZOHO_BILL_ACCOUNT_ID to the account id from Zoho Books "
+                "Settings -> Chart of Accounts"
+            )
         require_positive_amount(amount_cents)
         if gr_id:
             raise ConflictError(
@@ -271,6 +284,7 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
                     "name": f"Invoice {number}",
                     "rate": amount_cents / 100,
                     "quantity": 1,
+                    "account_id": self.bill_account_id,
                 }
             ],
         }

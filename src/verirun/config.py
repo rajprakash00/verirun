@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     zoho_token_key: SecretStr = SecretStr("")
     zoho_api_base_url: str = "https://www.zohoapis.in/books/v3"
     zoho_accounts_domain: str = "https://accounts.zoho.in"
+    zoho_bill_account_id: str = ""
     zoho_timeout_s: float = 30.0
     max_steps: int = DEFAULT_MAX_STEPS
     max_cost_usd: float = DEFAULT_MAX_COST_USD

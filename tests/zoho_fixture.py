@@ -11,6 +11,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "zoho"
 VENDOR_ID = "4600000000001"
 PO_ID = "4600000000101"
 BILL_ID = "4600000000201"
+BILL_ACCOUNT_ID = "4600000000401"
 
 
 class FakeTokens:

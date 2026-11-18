@@ -159,7 +159,9 @@ def _zoho_accounting(settings: Settings) -> tuple[ZohoAccountingReads, ZohoAccou
     )
     verifier_reads = ZohoAccountingReads(read_client)
     write_reads = ZohoAccountingReads(write_client)
-    return verifier_reads, ZohoAccountingSystem(write_reads)
+    return verifier_reads, ZohoAccountingSystem(
+        write_reads, bill_account_id=settings.zoho_bill_account_id
+    )
 
 
 def _zoho_client(

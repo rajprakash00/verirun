@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from tests.zoho_fixture import (
+    BILL_ACCOUNT_ID,
     PO_ID,
     VENDOR_ID,
     FakeTokens,
@@ -199,7 +200,7 @@ def test_polling_for_a_bill_times_out_as_not_found() -> None:
 
 def test_a_purchase_bill_is_posted_once_with_its_key_and_purchase_order() -> None:
     fake = ZohoBooksFake()
-    accounting = ZohoAccountingSystem(zoho_reads(fake))
+    accounting = ZohoAccountingSystem(zoho_reads(fake), bill_account_id=BILL_ACCOUNT_ID)
 
     bill = accounting.create_purchase_bill(
         number="PTS/2026/0142",
@@ -224,11 +225,12 @@ def test_a_purchase_bill_is_posted_once_with_its_key_and_purchase_order() -> Non
     assert body["purchaseorder_ids"] == [PO_ID]
     assert body["reference_number"] == "verirun:step-1:erp.file_invoice:abc123"
     assert body["line_items"][0]["rate"] == 11800.0
+    assert body["line_items"][0]["account_id"] == BILL_ACCOUNT_ID
 
 
 def test_a_retry_with_the_same_key_returns_the_bill_instead_of_posting_again() -> None:
     fake = ZohoBooksFake()
-    accounting = ZohoAccountingSystem(zoho_reads(fake))
+    accounting = ZohoAccountingSystem(zoho_reads(fake), bill_account_id=BILL_ACCOUNT_ID)
     arguments = {
         "number": "PTS/2026/0142",
         "vendor_id": VENDOR_ID,
@@ -247,7 +249,7 @@ def test_a_retry_with_the_same_key_returns_the_bill_instead_of_posting_again() -
 
 def test_a_same_number_bill_without_our_key_is_a_duplicate() -> None:
     fake = ZohoBooksFake()
-    accounting = ZohoAccountingSystem(zoho_reads(fake))
+    accounting = ZohoAccountingSystem(zoho_reads(fake), bill_account_id=BILL_ACCOUNT_ID)
     accounting.create_purchase_bill(
         number="PTS/2026/0142",
         vendor_id=VENDOR_ID,
@@ -269,7 +271,7 @@ def test_a_same_number_bill_without_our_key_is_a_duplicate() -> None:
 
 def test_an_unknown_write_outcome_is_reconciled_after_the_bill_landed() -> None:
     fake = ZohoBooksFake(fail_post_after_create=True)
-    accounting = ZohoAccountingSystem(zoho_reads(fake))
+    accounting = ZohoAccountingSystem(zoho_reads(fake), bill_account_id=BILL_ACCOUNT_ID)
 
     bill = accounting.create_purchase_bill(
         number="PTS/2026/0142",
@@ -285,7 +287,7 @@ def test_an_unknown_write_outcome_is_reconciled_after_the_bill_landed() -> None:
 
 def test_an_unknown_write_outcome_with_nothing_to_reconcile_is_raised() -> None:
     fake = ZohoBooksFake(fail_post_before_create=True)
-    accounting = ZohoAccountingSystem(zoho_reads(fake))
+    accounting = ZohoAccountingSystem(zoho_reads(fake), bill_account_id=BILL_ACCOUNT_ID)
 
     with pytest.raises(WriteOutcomeUnknownError):
         accounting.create_purchase_bill(
@@ -309,7 +311,9 @@ def test_a_failed_reconcile_keeps_the_outcome_unknown_instead_of_retrying() -> N
             return httpx.Response(503, json={"code": 9999, "message": "busy"})
         return recorded(request)
 
-    accounting = ZohoAccountingSystem(zoho_reads(handler))
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler), bill_account_id=BILL_ACCOUNT_ID
+    )
 
     with pytest.raises(WriteOutcomeUnknownError):
         accounting.create_purchase_bill(
@@ -322,7 +326,9 @@ def test_a_failed_reconcile_keeps_the_outcome_unknown_instead_of_retrying() -> N
 
 
 def test_a_goods_receipt_cannot_be_attached_to_a_zoho_bill() -> None:
-    accounting = ZohoAccountingSystem(zoho_reads())
+    accounting = ZohoAccountingSystem(
+        zoho_reads(), bill_account_id=BILL_ACCOUNT_ID
+    )
 
     with pytest.raises(ConflictError, match="goods receipt"):
         accounting.create_purchase_bill(
@@ -331,3 +337,35 @@ def test_a_goods_receipt_cannot_be_attached_to_a_zoho_bill() -> None:
             amount_cents=1_180_000,
             gr_id="GR-1",
         )
+
+
+def test_the_posted_bill_line_carries_the_expense_account() -> None:
+    fake = ZohoBooksFake()
+    accounting = ZohoAccountingSystem(
+        zoho_reads(fake), bill_account_id=BILL_ACCOUNT_ID
+    )
+
+    accounting.create_purchase_bill(
+        number="PTS/2026/0142",
+        vendor_id=VENDOR_ID,
+        amount_cents=1_180_000,
+        currency="INR",
+    )
+
+    assert fake.posts[0]["line_items"][0]["account_id"] == BILL_ACCOUNT_ID
+
+
+def test_an_empty_bill_account_is_rejected_before_any_write() -> None:
+    fake = ZohoBooksFake()
+    accounting = ZohoAccountingSystem(zoho_reads(fake))
+
+    with pytest.raises(ConflictError, match="VERIRUN_ZOHO_BILL_ACCOUNT_ID"):
+        accounting.create_purchase_bill(
+            number="PTS/2026/0142",
+            vendor_id=VENDOR_ID,
+            amount_cents=1_180_000,
+            currency="INR",
+            idempotency_key="step-1:erp.file_invoice:abc123",
+        )
+
+    assert fake.posts == []
