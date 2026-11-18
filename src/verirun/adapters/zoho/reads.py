@@ -225,8 +225,9 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
     adapter refuses the write before any POST instead of letting Zoho reject it.
 
     Zoho links a bill to a purchase order only through a common item, so a
-    PO-linked bill takes ``item_id`` from the PO's single line instead and
-    sends no account. Multi-line POs need a real line mapping and are rejected.
+    PO-linked bill takes ``item_id`` and the line's ``tax_id`` from the PO's
+    single line instead and sends no account. Multi-line POs need a real line
+    mapping and are rejected.
     """
 
     def __init__(
@@ -272,7 +273,7 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
                 existing_id=duplicate.id,
                 existing_status=duplicate.status,
             )
-        item_id = self._purchase_order_item_id(po_id) if po_id else ""
+        item_id, tax_id = self._purchase_order_line(po_id) if po_id else ("", "")
         if not item_id and not self.bill_account_id:
             raise ConflictError(
                 "Zoho Books needs an expense account for a bill line without an "
@@ -286,6 +287,7 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
         }
         if item_id:
             line["item_id"] = item_id
+            line["tax_id"] = tax_id
         else:
             line["account_id"] = self.bill_account_id
         body: dict[str, Any] = {
@@ -325,14 +327,16 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
             # retry.
             return created
 
-    def _purchase_order_item_id(self, po_id: str) -> str:
-        """The item a bill line takes from the purchase order it links to.
+    def _purchase_order_line(self, po_id: str) -> tuple[str, str]:
+        """The item and tax a bill line takes from the purchase order.
 
-        Zoho refuses a bill-to-PO link when the two share no item. The write
-        token cannot list items, but it can read the PO the bill cites, so the
-        PO's single line is the item source. A PO with zero or several lines
-        cannot be mapped to one bill line yet, and a line without an item has
-        nothing to share; both are conflicts before any write.
+        Zoho refuses a bill-to-PO link when the two share no item, and a
+        tax-enabled organisation requires a tax treatment on every line. The
+        write token cannot list items or taxes, but it can read the PO the bill
+        cites, so the PO's single line is the source for both. A PO with zero
+        or several lines cannot be mapped to one bill line yet, and a line
+        without an item or a tax has nothing to share; all are conflicts before
+        any write.
         """
         payload = self.client.get(f"/purchaseorders/{po_id}")
         order = payload.get("purchaseorder")
@@ -360,7 +364,13 @@ class ZohoAccountingSystem(ZohoAccountingReads, AccountingSystem):
                 f"Zoho Books purchase order {po_id} has one line with no item_id; "
                 "a purchase bill cannot be linked to it"
             )
-        return item_id
+        tax_id = _text(lines[0].get("tax_id"))
+        if not tax_id:
+            raise ConflictError(
+                f"Zoho Books purchase order {po_id} has one line with no tax_id; "
+                "the bill line needs a tax treatment from the purchase order"
+            )
+        return item_id, tax_id
 
     def _existing_bill(self, *, number: str, vendor_id: str) -> Bill | None:
         bills = self.list_bills(number=number, vendor_id=vendor_id)

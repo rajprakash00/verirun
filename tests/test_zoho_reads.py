@@ -17,6 +17,7 @@ from tests.zoho_fixture import (
     BILL_ACCOUNT_ID,
     PO_ID,
     PO_ITEM_ID,
+    PO_TAX_ID,
     VENDOR_ID,
     FakeTokens,
     ZohoBooksFake,
@@ -227,6 +228,7 @@ def test_a_purchase_bill_is_posted_once_with_its_key_and_purchase_order() -> Non
     assert body["reference_number"] == "verirun:step-1:erp.file_invoice:abc123"
     assert body["line_items"][0]["rate"] == 11800.0
     assert body["line_items"][0]["item_id"] == PO_ITEM_ID
+    assert body["line_items"][0]["tax_id"] == PO_TAX_ID
     assert "account_id" not in body["line_items"][0]
 
 
@@ -372,6 +374,7 @@ def test_a_po_bill_takes_the_item_and_needs_no_expense_account() -> None:
 
     line = fake.posts[0]["line_items"][0]
     assert line["item_id"] == PO_ITEM_ID
+    assert line["tax_id"] == PO_TAX_ID
     assert "account_id" not in line
 
 
@@ -423,6 +426,33 @@ def test_a_purchase_order_without_lines_is_rejected_before_any_write() -> None:
     )
 
     with pytest.raises(ConflictError, match="no line items"):
+        accounting.create_purchase_bill(
+            number="PTS/2026/0142",
+            vendor_id=VENDOR_ID,
+            amount_cents=1_180_000,
+            currency="INR",
+            po_id=PO_ID,
+        )
+    assert fake.posts == []
+
+
+def test_a_purchase_order_line_without_a_tax_is_rejected_before_any_write() -> None:
+    fake = ZohoBooksFake()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith(
+            f"/purchaseorders/{PO_ID}"
+        ):
+            order = fixture("purchaseorder.json")
+            order["purchaseorder"]["line_items"][0].pop("tax_id")
+            return httpx.Response(200, json=order)
+        return fake(request)
+
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler), bill_account_id=BILL_ACCOUNT_ID
+    )
+
+    with pytest.raises(ConflictError, match="tax treatment"):
         accounting.create_purchase_bill(
             number="PTS/2026/0142",
             vendor_id=VENDOR_ID,
