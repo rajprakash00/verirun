@@ -253,6 +253,11 @@ def run_policy_facts(
                     and minimum < threshold
                 )
             )
+            validations = data.get("validations") or []
+            result["extraction_validations_failed"] = any(
+                isinstance(item, dict) and item.get("ok") is False
+                for item in validations
+            )
             total_paise = parsed.get("total_paise")
             if isinstance(total_paise, int) and not isinstance(total_paise, bool):
                 extracted = total_paise / 100
@@ -284,6 +289,9 @@ def run_policy_facts(
                     result["vendor_identity_matches"] = gstin_ok and name_ok
             po_reference = parsed.get("po_reference")
             po_id = args.get("po_id")
+            result["purchase_order_present"] = (
+                isinstance(po_reference, str) and bool(po_reference)
+            )
             if (
                 accounting is not None
                 and isinstance(po_id, str)

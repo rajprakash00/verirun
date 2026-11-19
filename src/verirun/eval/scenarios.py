@@ -1159,8 +1159,10 @@ INDIA_SCENARIOS: tuple[Scenario, ...] = (
     ),
     _india_scenario(
         "india_tax_mismatch",
-        expected_state=RunState.FAILED,
-        expected_failed_checks=("bill-filed",),
+        expected_state=RunState.NEEDS_HUMAN,
+        escalations=1,
+        escalation_reason="failed a GSTIN or tax validation",
+        checks=(),
     ),
     _india_scenario(
         "india_missing_po",
