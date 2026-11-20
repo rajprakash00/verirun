@@ -54,11 +54,18 @@ TAX_FORM_EMAIL = re.compile(r"^Email:\s*(\S+)\s*$", re.MULTILINE)
 
 @dataclass(frozen=True)
 class CheckOutcome:
-    """One check's verdict: pass/fail, a human detail, and evidence references."""
+    """One check's verdict: pass/fail, a human detail, and evidence references.
+
+    ``duplicate`` marks the one failure a human must decide instead of the
+    engine discarding it: the system of record already holds the Run's intended
+    outcome, and this Run did not create it. Escalating it is the engine's
+    duplicate path; every other failed check still ends the Run failed.
+    """
 
     ok: bool
     detail: str
     evidence: tuple[str, ...] = ()
+    duplicate: bool = False
 
 
 @dataclass(frozen=True)
@@ -400,6 +407,7 @@ def check_accounting_invoice_matches(
             f"no successful {INVOICE_EXTRACT_TOOL} action is recorded on this Run",
         )
     failures: list[str] = []
+    duplicates: list[str] = []
     evidence: list[str] = []
     for record in extractions:
         data = record.data or {}
@@ -451,6 +459,19 @@ def check_accounting_invoice_matches(
             claimed = _claimed_bill_id(
                 context, number=number, vendor_id=vendor.id
             )
+            if claimed is None:
+                # This Run wrote nothing. A live bill with the same vendor and
+                # number is somebody else's copy of the invoice, so a human
+                # decides; the Run never retries into a second bill.
+                detail = (
+                    f"{number}: {context.accounting.display_name} already has a bill "
+                    f"for vendor {vendor.id} as {existing[0].id} "
+                    f"({existing[0].status})"
+                )
+                evidence.append(f"accounting:bill:{existing[0].id}")
+                failures.append(detail)
+                duplicates.append(detail)
+                continue
             if len(existing) != 1 or existing[0].id != claimed:
                 evidence.append(f"accounting:bill:{existing[0].id}")
                 failures.append(
@@ -503,7 +524,9 @@ def check_accounting_invoice_matches(
             if purchase_order is not None:
                 evidence.append(f"accounting:purchaseorder:{order.id}")
     if failures:
-        return CheckOutcome(False, "; ".join(failures), tuple(evidence))
+        return CheckOutcome(
+            False, "; ".join(failures), tuple(evidence), duplicate=bool(duplicates)
+        )
     return CheckOutcome(
         True,
         f"{len(extractions)} extracted invoice(s) match their vendor, duplicate, and "
@@ -941,6 +964,7 @@ def verify_run(
         client=client,
     )
     results: list[CheckResult] = []
+    duplicates: list[str] = []
     for check in task_pack.verification:
         function = CHECKS.get(check.check)
         if function is None:
@@ -950,6 +974,8 @@ def verify_run(
                 outcome = function(check.params, context)
             except Exception as exc:  # noqa: BLE001 - a broken check is a failed check, not a crash
                 outcome = CheckOutcome(False, f"check crashed: {type(exc).__name__}: {exc}")
+        if outcome.duplicate:
+            duplicates.append(outcome.detail)
         results.append(
             CheckResult(
                 id=check.id,
@@ -962,6 +988,18 @@ def verify_run(
     store.save_verification(run_id, results)
     failed = [result.id for result in results if not result.ok]
     if failed:
+        if duplicates:
+            # The Run's intended outcome already exists in the system of record
+            # and this Run did not create it. Retrying cannot fix that; a human
+            # decides whether the duplicate is ignored.
+            detail = "; ".join(dict.fromkeys(duplicates))
+            store.escalate(
+                run_id,
+                reason=f"duplicate invoice: {detail}",
+                question=f"{detail}. Should this invoice be ignored?",
+                context={"duplicate": True, "failed_checks": failed},
+            )
+            return store.get_run(run_id)
         store.set_error(run_id, f"verification failed: {', '.join(failed)}")
         return store.transition(run_id, RunState.FAILED)
     return store.transition(run_id, RunState.COMPLETED)

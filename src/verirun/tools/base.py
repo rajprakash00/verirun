@@ -69,6 +69,19 @@ class Tool(ABC):
         """Facts the policy gate needs before this tool runs. Read-only."""
         return {}
 
+    def approval_arguments(
+        self, args: dict[str, Any], facts: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The exact arguments an Approval Request may carry.
+
+        Run facts can prove that an argument the model proposed is not backed
+        by the Run's own evidence, such as a purchase order the extraction
+        never printed. A prepared action must not present or later write such
+        an argument, so a Tool drops it here before the Run parks. Tools with
+        no such relationship keep the arguments unchanged.
+        """
+        return args
+
     def claim_key(self, args: dict[str, Any]) -> str | None:
         """The natural key this side effect must not write twice.
 

@@ -376,6 +376,21 @@ class FileInvoiceTool(ErpTool):
             },
         )
 
+    def approval_arguments(
+        self, args: dict[str, Any], facts: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Never prepare a purchase order the invoice did not print.
+
+        The Run fact comes from the extraction, not from the model's proposed
+        arguments. When the extraction cites no purchase order, a proposed
+        ``po_id`` is unbacked: a human must not be asked to approve it, and an
+        approval must not write it.
+        """
+        prepared = dict(args)
+        if facts.get("purchase_order_present") is False:
+            prepared.pop("po_id", None)
+        return prepared
+
     def policy_facts(self, args: dict[str, Any]) -> dict[str, Any]:
         """The facts the approval rules read before a purchase bill is created.
 

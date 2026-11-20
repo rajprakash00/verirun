@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from verirun.context.policies import PolicyDecision, PolicySet
+from verirun.engine.models import IDEMPOTENCY_KEY_ARG
 from verirun.tools.base import Tool
 
 RunFacts = Callable[[dict[str, Any]], dict[str, Any]]
@@ -102,4 +103,15 @@ class PolicyGate:
                 rule=decision.rule,
                 reason=f"approval gates disabled (eval ablation): {decision.reason}",
             )
+        if decision.outcome == "require_approval":
+            # The engine's idempotency key is for the adapter, not for the
+            # action a human approves.
+            visible = {
+                key: value
+                for key, value in args.items()
+                if key != IDEMPOTENCY_KEY_ARG
+            }
+            prepared = tool.approval_arguments(visible, all_facts)
+            if prepared != visible:
+                decision = decision.model_copy(update={"prepared_arguments": prepared})
         return decision

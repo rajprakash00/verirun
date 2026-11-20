@@ -204,6 +204,42 @@ def test_a_fabricated_purchase_order_for_a_no_po_invoice_parks_for_approval(
     assert observation.data["rule"] == "missing-purchase-order-needs-approval"
 
 
+def test_an_unbacked_purchase_order_is_not_prepared_for_approval(
+    tmp_path: Path,
+) -> None:
+    """A human must not be asked to approve a PO the extraction never printed."""
+    observation = gate_registry(tmp_path, purchase_order=False).invoke(
+        "erp.file_invoice", file_args(amount=10_000.0, po_id="PO-OTHER")
+    )
+
+    assert observation.data["approval_required"] is True
+    assert "po_id" not in observation.data["arguments"]
+    assert observation.data["unbacked_arguments"] == ["po_id"]
+    assert "without unbacked argument(s): po_id" in observation.summary
+    # The rest of the prepared action and the reason are preserved for the human.
+    assert observation.data["arguments"] == {
+        "number": INVOICE_NUMBER,
+        "vendor_id": "V-IN-1001",
+        "amount": 10_000.0,
+        "currency": "INR",
+    }
+    assert observation.data["rule"] == "missing-purchase-order-needs-approval"
+    assert observation.data["reason"]
+
+
+def test_a_matched_purchase_order_is_kept_in_the_prepared_action(
+    tmp_path: Path,
+) -> None:
+    observation = gate_registry(tmp_path).invoke(
+        "erp.file_invoice", file_args(amount=10_001.0, po_id=PO_ID)
+    )
+
+    assert observation.data["approval_required"] is True
+    assert observation.data["rule"] == "bill-approval-threshold"
+    assert observation.data["arguments"]["po_id"] == PO_ID
+    assert "unbacked_arguments" not in observation.data
+
+
 def test_missing_po_rule_wins_over_the_amount_threshold(tmp_path: Path) -> None:
     observation = gate_registry(tmp_path, purchase_order=False).invoke(
         "erp.file_invoice", file_args(amount=10_001.0, po_id="PO-OTHER")
