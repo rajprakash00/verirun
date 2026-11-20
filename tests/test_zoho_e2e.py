@@ -23,8 +23,15 @@ from tests.india_fixture import (
     write_invoice_pdf,
 )
 from tests.support import ROOT, ScriptedClient, text_turn, tool_turn
+from tests.zoho_fixture import (
+    BILL_ACCOUNT_ID,
+    PO_ITEM_ID,
+    PO_TAX_ID,
+    VENDOR_ID,
+    FakeTokens,
+    ZohoBooksFake,
+)
 from tests.zoho_fixture import PO_ID as ZOHO_PO_ID
-from tests.zoho_fixture import VENDOR_ID, FakeTokens, ZohoBooksFake
 from verirun.adapters import WatchedFolderSource
 from verirun.adapters.zoho import (
     ZohoAccountingReads,
@@ -128,7 +135,9 @@ def zoho_clients(fake: ZohoBooksFake) -> tuple[ZohoAccountingReads, ZohoAccounti
 
     reads = ZohoAccountingReads(client())
     write_reads = ZohoAccountingReads(client())
-    return reads, ZohoAccountingSystem(write_reads)
+    return reads, ZohoAccountingSystem(
+        write_reads, bill_account_id=BILL_ACCOUNT_ID
+    )
 
 
 def settings(tmp_path: Path) -> Settings:
@@ -274,6 +283,9 @@ def test_a_bill_over_the_threshold_parks_then_is_created_once(
     assert len(fake.posts) == 1
     assert fake.posts[0]["bill_number"] == INVOICE_NUMBER
     assert fake.posts[0]["vendor_id"] == VENDOR_ID
+    assert fake.posts[0]["line_items"][0]["item_id"] == PO_ITEM_ID
+    assert fake.posts[0]["line_items"][0]["tax_id"] == PO_TAX_ID
+    assert "account_id" not in fake.posts[0]["line_items"][0]
     assert fake.posts[0]["purchaseorder_ids"] == [ZOHO_PO_ID]
     assert fake.posts[0]["reference_number"].startswith(
         "verirun:step-3:erp.file_invoice:"

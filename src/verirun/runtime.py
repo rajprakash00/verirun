@@ -159,7 +159,9 @@ def _zoho_accounting(settings: Settings) -> tuple[ZohoAccountingReads, ZohoAccou
     )
     verifier_reads = ZohoAccountingReads(read_client)
     write_reads = ZohoAccountingReads(write_client)
-    return verifier_reads, ZohoAccountingSystem(write_reads)
+    return verifier_reads, ZohoAccountingSystem(
+        write_reads, bill_account_id=settings.zoho_bill_account_id
+    )
 
 
 def _zoho_client(
@@ -251,6 +253,11 @@ def run_policy_facts(
                     and minimum < threshold
                 )
             )
+            validations = data.get("validations") or []
+            result["extraction_validations_failed"] = any(
+                isinstance(item, dict) and item.get("ok") is False
+                for item in validations
+            )
             total_paise = parsed.get("total_paise")
             if isinstance(total_paise, int) and not isinstance(total_paise, bool):
                 extracted = total_paise / 100
@@ -282,6 +289,9 @@ def run_policy_facts(
                     result["vendor_identity_matches"] = gstin_ok and name_ok
             po_reference = parsed.get("po_reference")
             po_id = args.get("po_id")
+            result["purchase_order_present"] = (
+                isinstance(po_reference, str) and bool(po_reference)
+            )
             if (
                 accounting is not None
                 and isinstance(po_id, str)

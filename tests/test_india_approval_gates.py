@@ -33,6 +33,7 @@ def gate_registry(
     min_confidence: float = 0.95,
     low_confidence: bool = False,
     purchase_order: bool = True,
+    validations: list[dict] | None = None,
 ) -> ToolRegistry:
     accounting = InMemoryAccountingSystem(
         vendors=[
@@ -89,6 +90,7 @@ def gate_registry(
                 },
                 "min_confidence": min_confidence,
                 "low_confidence": low_confidence,
+                "validations": validations or [],
             },
         ),
         tool="invoice.extract",
@@ -180,13 +182,55 @@ def test_a_purchase_order_that_differs_from_the_invoice_parks_for_approval(
 def test_a_missing_required_purchase_order_parks_for_approval(
     tmp_path: Path,
 ) -> None:
-    observation = gate_registry(tmp_path).invoke(
+    observation = gate_registry(tmp_path, purchase_order=False).invoke(
         "erp.file_invoice", file_args(amount=10_000.0, po_id=None)
     )
 
     assert not observation.ok
     assert observation.data["approval_required"] is True
     assert observation.data["rule"] == "missing-purchase-order-needs-approval"
+
+
+def test_a_fabricated_purchase_order_for_a_no_po_invoice_parks_for_approval(
+    tmp_path: Path,
+) -> None:
+    """The invoice has no PO, so a model-supplied PO cannot satisfy the rule."""
+    observation = gate_registry(tmp_path, purchase_order=False).invoke(
+        "erp.file_invoice", file_args(amount=10_000.0, po_id="PO-OTHER")
+    )
+
+    assert not observation.ok
+    assert observation.data["approval_required"] is True
+    assert observation.data["rule"] == "missing-purchase-order-needs-approval"
+
+
+def test_missing_po_rule_wins_over_the_amount_threshold(tmp_path: Path) -> None:
+    observation = gate_registry(tmp_path, purchase_order=False).invoke(
+        "erp.file_invoice", file_args(amount=10_001.0, po_id="PO-OTHER")
+    )
+
+    assert not observation.ok
+    assert observation.data["approval_required"] is True
+    assert observation.data["rule"] == "missing-purchase-order-needs-approval"
+
+
+def test_a_failed_gst_validation_is_a_denial_not_a_gate(tmp_path: Path) -> None:
+    observation = gate_registry(
+        tmp_path,
+        validations=[
+            {
+                "id": "tax_sum",
+                "ok": False,
+                "detail": "taxable + CGST + SGST + IGST is not the invoice total",
+            }
+        ],
+    ).invoke("erp.file_invoice", file_args(amount=10_000.0))
+
+    assert not observation.ok
+    assert observation.error_kind == "policy"
+    assert observation.data["outcome"] == "forbid"
+    assert observation.data["approval_required"] is False
+    assert observation.data["rule"] == "no-bill-for-failed-gst-validation"
 
 
 def test_a_low_confidence_extraction_parks_for_approval(tmp_path: Path) -> None:

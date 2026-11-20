@@ -10,7 +10,10 @@ import httpx
 FIXTURES = Path(__file__).parent / "fixtures" / "zoho"
 VENDOR_ID = "4600000000001"
 PO_ID = "4600000000101"
+PO_ITEM_ID = "4600000000090"
+PO_TAX_ID = "4600000000077"
 BILL_ID = "4600000000201"
+BILL_ACCOUNT_ID = "4600000000401"
 
 
 class FakeTokens:
@@ -35,9 +38,9 @@ def fixture(name: str) -> dict:
 class ZohoBooksFake:
     """A stateful Zoho Books stub for the write path.
 
-    GET /bills serves the recorded bills plus anything this fake created. POST
-    /bills records the body, creates a bill, and can fail before or after the
-    create to exercise reconciliation.
+    POST /bills records the body, creates a bill, and can fail before or after
+    the create to exercise reconciliation. GET /bills serves summaries without
+    the purchase-order link, like Zoho; GET /bills/{id} serves the full bill.
     """
 
     def __init__(
@@ -72,6 +75,13 @@ class ZohoBooksFake:
             if self.fail_post_after_create:
                 return httpx.Response(503, json={"code": 9999, "message": "busy"})
             return httpx.Response(201, json={"code": 0, "message": "success", "bill": bill})
+        if request.method == "GET" and "/bills/" in request.url.path:
+            bill_id = request.url.path.rsplit("/", 1)[-1]
+            for bill in self.bills:
+                if bill["bill_id"] == bill_id:
+                    return httpx.Response(
+                        200, json={"code": 0, "message": "success", "bill": bill}
+                    )
         if request.method == "GET" and request.url.path.endswith("/bills"):
             return httpx.Response(
                 200,
@@ -83,7 +93,14 @@ class ZohoBooksFake:
                         "per_page": 200,
                         "has_more_page": False,
                     },
-                    "bills": self.bills,
+                    "bills": [
+                        {
+                            key: value
+                            for key, value in bill.items()
+                            if key not in {"purchaseorder_ids", "purchaseorders"}
+                        }
+                        for bill in self.bills
+                    ],
                 },
             )
         return recorded(request)

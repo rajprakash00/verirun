@@ -7,12 +7,14 @@ the executor writes it, then the Verifier inspects real state only.
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from mocks.ledgerlite import db as ledgerlite
 from tests.india_fixture import (
     GSTIN,
+    INVOICE_LINES,
     INVOICE_NUMBER,
     PDF_FILENAME,
     PO_ID,
@@ -25,6 +27,7 @@ from verirun.adapters import (
     Bill,
     InMemoryAccountingSystem,
     MockAccountingSystem,
+    NotFoundError,
     PurchaseOrder,
     Vendor,
 )
@@ -846,6 +849,24 @@ def test_a_void_bill_does_not_block_the_match(tmp_path: Path) -> None:
     assert run.state is RunState.COMPLETED
 
 
+def test_a_closed_purchase_order_matches_when_the_pack_allows_it(
+    tmp_path: Path,
+) -> None:
+    store = RunStore(tmp_path / "runs.db")
+    seed_verifying_run(store)
+    seed_extraction(store)
+
+    run = verify_run(
+        "RUN-0001",
+        matching_pack(purchase_order_statuses=["open", "closed"]),
+        store,
+        accounting=india_accounting(po_status="closed"),
+        shared_root=tmp_path,
+    )
+
+    assert run.state is RunState.COMPLETED
+
+
 def test_a_cancelled_purchase_order_fails_the_match(tmp_path: Path) -> None:
     store = RunStore(tmp_path / "runs.db")
     seed_verifying_run(store)
@@ -980,6 +1001,29 @@ def verified_india_bill(
     return store, accounting
 
 
+class _SummaryBillReads:
+    """A read view whose list omits the PO link, as Zoho Books' list does."""
+
+    def __init__(self, inner: InMemoryAccountingSystem) -> None:
+        self._inner = inner
+
+    def list_bills(self, **filters: Any) -> list[Bill]:
+        return [
+            replace(bill, po_id=None)
+            for bill in self._inner.list_bills(**filters)
+        ]
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _MissingDetailBillReads(_SummaryBillReads):
+    """A read view whose bill detail is unavailable after the list succeeds."""
+
+    def get_bill(self, bill_id: str) -> Bill:
+        raise NotFoundError(f"no invoice '{bill_id}' in the accounting system")
+
+
 def test_an_india_bill_is_verified_against_its_source_tax_invoice(
     tmp_path: Path,
 ) -> None:
@@ -1000,6 +1044,46 @@ def test_an_india_bill_is_verified_against_its_source_tax_invoice(
     assert f"source:processed/{PDF_FILENAME}" in result.evidence
     assert f"gstin:{GSTIN}" in result.evidence
     assert "tax:tax_sum" in result.evidence
+
+
+def test_a_summary_bill_is_refetched_before_the_purchase_order_is_judged(
+    tmp_path: Path,
+) -> None:
+    store, accounting = verified_india_bill(tmp_path)
+
+    run = verify_run(
+        "RUN-0001",
+        india_bill_pack(),
+        store,
+        accounting=_SummaryBillReads(accounting),
+        shared_root=tmp_path / "shared",
+    )
+
+    assert run.state is RunState.COMPLETED
+    result = store.get_verification("RUN-0001")[0]
+    assert result.ok
+    assert f"accounting:purchaseorder:{PO_ID}" in result.evidence
+
+
+def test_a_bill_detail_read_failure_falls_back_to_the_summary(
+    tmp_path: Path,
+) -> None:
+    source_lines = tuple(
+        line for line in INVOICE_LINES if not line.startswith("Purchase order:")
+    )
+    store, accounting = verified_india_bill(tmp_path, source_lines=source_lines)
+
+    run = verify_run(
+        "RUN-0001",
+        india_bill_pack(),
+        store,
+        accounting=_MissingDetailBillReads(accounting),
+        shared_root=tmp_path / "shared",
+    )
+
+    assert run.state is RunState.COMPLETED
+    result = store.get_verification("RUN-0001")[0]
+    assert result.ok
 
 
 def test_a_bill_amount_that_differs_from_the_source_fails_the_check(

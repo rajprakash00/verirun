@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.zoho_fixture import BILL_ACCOUNT_ID
 from verirun.adapters import ImapSource, MockMailSource, WatchedFolderSource
 from verirun.adapters.zoho import (
     ZohoAccountingReads,
@@ -39,6 +40,7 @@ def zoho_settings(tmp_path: Path, **overrides) -> Settings:
         "zoho_read_refresh_token": "refresh-token",
         "zoho_write_refresh_token": "write-refresh-token",
         "zoho_token_key": "operator-secret",
+        "zoho_bill_account_id": BILL_ACCOUNT_ID,
         "zoho_read_token_file": tmp_path / "zoho-read-token.enc",
         "zoho_write_token_file": tmp_path / "zoho-write-token.enc",
     }
@@ -112,6 +114,7 @@ def test_zoho_reads_replace_the_mock_accounting_when_configured(
     assert backends.verifier_accounting is backends.reads
     assert backends.verifier_accounting is not backends.accounting
     assert backends.reads.client is not backends.accounting.client
+    assert backends.accounting.bill_account_id == BILL_ACCOUNT_ID
     assert "client-secret" not in repr(zoho_settings(tmp_path))
 
 

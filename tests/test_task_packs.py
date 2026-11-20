@@ -275,6 +275,12 @@ def test_shipped_india_pack_is_valid() -> None:
         "accounting-invoice-matches",
         "source-archived",
     ]
+    matches = next(
+        check
+        for check in pack.verification
+        if check.id == "accounting-invoice-matches"
+    )
+    assert matches.params["purchase_order_statuses"] == ["open", "closed"]
     assert {rule.id for rule in pack.approval_rules} == {
         "bill-approval-threshold",
         "bill-amount-differs-from-extraction",

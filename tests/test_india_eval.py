@@ -108,9 +108,11 @@ def test_the_india_eval_runs_all_scenarios_with_the_fake_adapter(
     assert gstin.resumed is True
 
     tax = by_key["india_tax_mismatch"]
-    assert tax.state is RunState.FAILED
-    assert {check.id for check in tax.verification if not check.ok} == {"bill-filed"}
-    assert tax.human_interventions == 0
+    assert tax.state is RunState.NEEDS_HUMAN
+    assert tax.verification == []
+    assert len(tax.escalations) == 1
+    assert "failed a GSTIN or tax validation" in tax.escalations[0].reason
+    assert tax.human_interventions == 1
 
     transient = by_key["india_transient"]
     assert transient.state is RunState.COMPLETED
