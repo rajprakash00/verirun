@@ -437,6 +437,58 @@ def test_a_purchase_order_without_lines_is_rejected_before_any_write() -> None:
     assert fake.posts == []
 
 
+def test_a_purchase_order_line_without_an_item_is_rejected_before_any_write() -> None:
+    fake = ZohoBooksFake()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith(
+            f"/purchaseorders/{PO_ID}"
+        ):
+            order = fixture("purchaseorder.json")
+            order["purchaseorder"]["line_items"][0].pop("item_id")
+            return httpx.Response(200, json=order)
+        return fake(request)
+
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler), bill_account_id=BILL_ACCOUNT_ID
+    )
+
+    with pytest.raises(ConflictError, match="no item_id"):
+        accounting.create_purchase_bill(
+            number="PTS/2026/0142",
+            vendor_id=VENDOR_ID,
+            amount_cents=1_180_000,
+            currency="INR",
+            po_id=PO_ID,
+        )
+    assert fake.posts == []
+
+
+def test_a_purchase_order_response_without_an_order_is_not_found() -> None:
+    fake = ZohoBooksFake()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith(
+            f"/purchaseorders/{PO_ID}"
+        ):
+            return httpx.Response(200, json={"code": 0, "message": "success"})
+        return fake(request)
+
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler), bill_account_id=BILL_ACCOUNT_ID
+    )
+
+    with pytest.raises(NotFoundError, match="no purchase order"):
+        accounting.create_purchase_bill(
+            number="PTS/2026/0142",
+            vendor_id=VENDOR_ID,
+            amount_cents=1_180_000,
+            currency="INR",
+            po_id=PO_ID,
+        )
+    assert fake.posts == []
+
+
 def test_a_purchase_order_line_without_a_tax_is_rejected_before_any_write() -> None:
     fake = ZohoBooksFake()
 
@@ -462,6 +514,69 @@ def test_a_purchase_order_line_without_a_tax_is_rejected_before_any_write() -> N
             po_id=PO_ID,
         )
     assert fake.posts == []
+
+
+def test_a_bill_detail_read_failure_falls_back_to_the_list_summary() -> None:
+    fake = ZohoBooksFake()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/bills/" in request.url.path:
+            return httpx.Response(404, json={"code": 1002, "message": "Record not found"})
+        return fake(request)
+
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler), bill_account_id=BILL_ACCOUNT_ID
+    )
+
+    bill = accounting.create_purchase_bill(
+        number="PTS/2026/0142",
+        vendor_id=VENDOR_ID,
+        amount_cents=1_180_000,
+        currency="INR",
+    )
+
+    assert bill.number == "PTS/2026/0142"
+    assert bill.po_id is None
+    assert len(fake.posts) == 1
+
+
+def test_a_list_that_lags_after_create_uses_the_create_response() -> None:
+    fake = ZohoBooksFake()
+    clock = FakeClock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path.endswith("/bills"):
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "message": "success",
+                    "page_context": {
+                        "page": 1,
+                        "per_page": 200,
+                        "has_more_page": False,
+                    },
+                    "bills": [],
+                },
+            )
+        return fake(request)
+
+    accounting = ZohoAccountingSystem(
+        zoho_reads(handler, clock=clock),
+        bill_account_id=BILL_ACCOUNT_ID,
+        sleep=clock.sleep,
+        clock=clock,
+    )
+
+    bill = accounting.create_purchase_bill(
+        number="PTS/2026/0142",
+        vendor_id=VENDOR_ID,
+        amount_cents=1_180_000,
+        currency="INR",
+    )
+
+    assert bill.number == "PTS/2026/0142"
+    assert len(fake.posts) == 1
 
 
 def test_an_empty_bill_account_is_rejected_before_any_write() -> None:
