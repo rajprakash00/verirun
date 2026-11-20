@@ -22,9 +22,21 @@ def _policy_observation(
     decision: PolicyDecision, tool: Tool, arguments: dict[str, Any]
 ) -> Observation:
     verb = "forbids" if decision.outcome == "forbid" else "requires approval for"
+    prepared = (
+        dict(decision.prepared_arguments)
+        if decision.prepared_arguments is not None
+        else dict(arguments)
+    )
+    dropped = sorted(set(arguments) - set(prepared))
+    summary = f"Policy {decision.policy} {verb} {tool.action}: {decision.reason}"
+    if dropped:
+        summary += (
+            " Prepared for approval without unbacked argument(s): "
+            f"{', '.join(dropped)}."
+        )
     return _failure(
         tool.name,
-        f"Policy {decision.policy} {verb} {tool.action}: {decision.reason}",
+        summary,
         "policy",
         action=tool.action,
         outcome=decision.outcome,
@@ -32,7 +44,8 @@ def _policy_observation(
         policy=decision.policy,
         rule=decision.rule,
         reason=decision.reason,
-        arguments=arguments,
+        arguments=prepared,
+        **({"unbacked_arguments": dropped} if dropped else {}),
     )
 
 

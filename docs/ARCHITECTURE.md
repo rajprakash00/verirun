@@ -214,6 +214,12 @@ inactive vendor is a `forbid` denial, not a gate. Decisions arrive through the d
 approval queue, which shows the source invoice, extraction, GST validations, and proposed
 bill. Timeouts never auto-approve. Ambiguity or repeated failure escalates with a question.
 
+The prepared action is the exact action an approval may submit. A Tool may narrow its
+arguments against the Run facts before the Run parks, so a human is never asked to approve
+an argument the Run cannot back: a purchase bill for an invoice that prints no purchase
+order is prepared without the model's proposed `po_id`. The dropped argument is recorded on
+the Observation and never written.
+
 ## 7. Verification
 
 The Verifier reads the Task Pack's verification contract and checks real state through the
@@ -226,7 +232,10 @@ against the read-only accounting client: one vendor whose GSTIN and name agree, 
 bill with the same vendor and number other than the bill this Run's own write names, and,
 when the source cites a purchase order, one open order whose amount and currency agree.
 Evidence references are system ids such as `accounting:vendor:<id>` and
-`accounting:purchaseorder:<id>`.
+`accounting:purchaseorder:<id>`. When the check finds a live bill this Run did not write,
+that failure is a duplicate, not a plain verification failure: the Run parks in
+`needs_human` with the existing bill id and status, so the operator decides whether to
+ignore the copy, and the accounting system keeps exactly one bill.
 
 The `india_bill_matches` check re-reads the source tax invoice from its PDF, independently
 of the executor's extraction, and compares the bill that this Run created: exactly one

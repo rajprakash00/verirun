@@ -568,15 +568,21 @@ class _Executor:
             )
             return StepOutcome.ESCALATED
         data = observation.data
+        # A gate may prepare a narrower action than the model proposed, for
+        # example a bill without a purchase order the extraction never printed.
+        # The key must name that exact action, or the approved call would not
+        # find its Approval Request on resume.
+        prepared = data.get("arguments")
+        arguments = prepared if isinstance(prepared, dict) else call.arguments
         prepare_approval(
             self.store,
             self.run_id,
-            key=action_key(step.id, call.name, call.arguments),
+            key=action_key(step.id, call.name, arguments),
             step_position=position,
             step_id=step.id,
             tool=call.name,
             action=str(data.get("action") or tool.action or call.name),
-            arguments=call.arguments,
+            arguments=arguments,
             policy=data.get("policy"),
             rule=data.get("rule"),
             reason=str(data.get("reason") or observation.summary),

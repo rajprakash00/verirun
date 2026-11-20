@@ -77,6 +77,9 @@ class PolicyDecision(BaseModel):
     policy: str | None = None
     rule: str | None = None
     reason: str
+    # An approval gate may drop an argument the Run cannot back from the action
+    # a human is asked to approve. None means the proposed arguments stand.
+    prepared_arguments: dict[str, Any] | None = None
 
 
 class PolicySet:

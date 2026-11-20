@@ -771,7 +771,16 @@ def test_an_extracted_invoice_matches_the_read_only_accounting_records(
     assert f"accounting:no-bill:V-IN-1001:{INVOICE_NUMBER}" in result.evidence
 
 
-def test_a_duplicate_invoice_fails_the_match(tmp_path: Path) -> None:
+def test_a_duplicate_invoice_without_a_run_write_escalates_to_a_human(
+    tmp_path: Path,
+) -> None:
+    """The agent never filed: the live bill is somebody else's copy.
+
+    A plain verification failure would end the Run `failed` and leave no
+    decision for the operator. The duplicate is a business condition, so the
+    Run parks in `needs_human` with the existing bill as the recorded reason,
+    and the accounting system keeps exactly one bill.
+    """
     store = RunStore(tmp_path / "runs.db")
     seed_verifying_run(store)
     seed_extraction(store)
@@ -786,21 +795,31 @@ def test_a_duplicate_invoice_fails_the_match(tmp_path: Path) -> None:
         status="approved",
         received_at=CREATED_AT,
     )
+    accounting = india_accounting(bills=(existing,))
 
     run = verify_run(
         "RUN-0001",
         matching_pack(),
         store,
-        accounting=india_accounting(bills=(existing,)),
+        accounting=accounting,
         shared_root=tmp_path,
     )
 
-    assert run.state is RunState.FAILED
+    assert run.state is RunState.NEEDS_HUMAN
+    assert run.error is None
+    assert len(accounting.list_bills()) == 1
     result = store.get_verification("RUN-0001")[0]
     assert not result.ok
     assert "INV-Z1" in result.detail
     assert "already" in result.detail
+    assert "approved" in result.detail
     assert "accounting:bill:INV-Z1" in result.evidence
+    escalations = store.list_escalations("RUN-0001")
+    assert len(escalations) == 1
+    assert escalations[0].reason.startswith("duplicate invoice: ")
+    assert "INV-Z1" in escalations[0].reason
+    assert "should this invoice be ignored" in escalations[0].question.lower()
+    assert escalations[0].context["duplicate"] is True
 
 
 def test_a_vendor_gstin_mismatch_fails_the_match(tmp_path: Path) -> None:
